@@ -1,0 +1,96 @@
+# =========================
+# Build directories
+# =========================
+build/
+Build/
+out/
+bin/
+
+# =========================
+# CMake
+# =========================
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+install_manifest.txt
+
+# =========================
+# Visual Studio
+# =========================
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.vcxproj.user.filters
+
+# =========================
+# Visual Studio Build Output
+# =========================
+Debug/
+Release/
+x64/
+x86/
+
+# =========================
+# MSVC Intermediate Files
+# =========================
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.ipch
+*.tlog
+*.lastbuildstate
+
+# =========================
+# Executables & Libraries
+# =========================
+*.exe
+*.dll
+*.lib
+*.exp
+
+# =========================
+# CUDA
+# =========================
+*.cubin
+*.fatbin
+*.ptx
+
+# =========================
+# Temporary Files
+# =========================
+*.tmp
+*.temp
+*.log
+*.cache
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Editors
+# =========================
+.vscode/
+.idea/
+
+# Keep workspace settings if desired
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# =========================
+# Generated datasets/checkpoints
+# =========================
+checkpoints/
+datasets/
+outputs/
+logs/

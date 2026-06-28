@@ -1,6 +1,8 @@
 #include "tensor/tensor.hpp"
 #include <cuda_runtime.h>
 #include <iostream>
+#include <cuda/cmath>
+#include <curand_kernel.h>
 
 template class tensor<float>;
 template class tensor<double>;
@@ -120,4 +122,154 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
     }
     return *this;
 }
+
+template <typename t>
+__global__ void fillKernel(t val, size_t storageLength, t* tens) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tens[idx] = val;
+    }
+}
+
+template<typename t>
+void tensor<t>::fill(t val) {
+    if (dev == device::CPU) {
+        toGPU();
+    }
+    fillKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(val, storageLength, tens);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+}
+
+template <typename t>
+__global__ void randomKernel(size_t storageLength, t* tens) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        curandState state;
+        curand_init(clock64(), idx, 0, &state);
+        tens[idx] = curand_uniform(&state);
+    }
+}
+
+template <typename t>
+void tensor<t>::random() {
+    if (dev == device::CPU) {
+        toGPU();
+    }
+    randomKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+}
+
+template <typename t>
+__global__ void addKernel(size_t storageLength, t* tensA, t* tensB) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx] += tensB[idx];
+    }
+}
+
+template <typename t>
+__global__ void subtractKernel(size_t storageLength, t* tensA, t* tensB) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx] -= tensB[idx];
+    }
+}
+
+template <typename t>
+tensor<t> tensor<t>::operator+(tensor& other) {
+    if (shape != other.shape){
+        throw std::invalid_argument("Tensors must have the same shape for addition.");
+    }
+    if (dev == device::CPU || other.dev == device::CPU) {
+        toGPU();
+        other.toGPU();
+    }
+    tensor<t> temp(*this);
+    addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    return temp;
+}
+
+template <typename t>
+tensor<t>& tensor<t>::operator+=(tensor& other) {
+    if (shape != other.shape){
+        throw std::invalid_argument("Tensors must have the same shape for addition.");
+    }
+    if (dev == device::CPU || other.dev == device::CPU) {
+        toGPU();
+        other.toGPU();
+    }
+    addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens, other.tens);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    return *this;
+}
+template <typename t>
+tensor<t> tensor<t>::operator-(tensor& other) {
+    if (shape != other.shape){
+        throw std::invalid_argument("Tensors must have the same shape for subtraction.");
+    }
+    if (dev == device::CPU || other.dev == device::CPU) {
+        toGPU();
+        other.toGPU();
+    }
+    tensor<t> temp(*this);
+    subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    return temp;
+}
+
+template <typename t>
+tensor<t>& tensor<t>::operator-=(tensor& other) {
+    if (shape != other.shape){
+        throw std::invalid_argument("Tensors must have the same shape for subtraction.");
+    }
+    if (dev == device::CPU || other.dev == device::CPU) {
+        toGPU();
+        other.toGPU();
+    }
+    subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens, other.tens);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    return *this;
+}
+
 

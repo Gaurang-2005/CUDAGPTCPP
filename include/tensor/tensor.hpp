@@ -63,6 +63,8 @@ public:
         return tens[index];
     }
 
+    template <typename ... Args>
+    requires (std::integral<Args> && ...)
     const t& operator()(Args...args) const {
         assert(sizeof...(args) == shape.size());
         size_t arg[] = {static_cast<size_t>(args)...};
@@ -95,18 +97,38 @@ public:
 
     void fill(t val);
     void zeros() {
-        constant(0);
+        fill(0);
     }
     void ones() {
-        constant(1);
+        fill(1);
     }
     void random();
     bool isEmpty() const {
         return storageLength == 0;
     }
 
-    tensor& operator+=(const tensor& other);
-    tensor& operator-=(const tensor& other);
-    tensor operator+(const tensor& other);
-    tensor operator-(const tensor& other);
+    tensor& operator+=(tensor& other);
+    tensor& operator-=(tensor& other);
+    tensor operator+(tensor& other);
+    tensor operator-(tensor& other);
+    tensor& operator*=(tensor& other);
+    tensor& operator/=(tensor& other);
+    tensor operator*(tensor& other);
+    tensor operator/(tensor& other);
+
+    template <typename ... Args>
+    requires (std::integral<Args> && ...)
+    void reshape(Args...args) {
+        std::vector<size_t> newShape = {static_cast<size_t>(args)...};
+        size_t newStorageLength = 1;
+        for (auto& i : newShape) {
+            newStorageLength *= i;
+        }
+        assert(newStorageLength == storageLength);
+        shape = newShape;
+    }
+
+    void print() const;
+    tensor transposed();
+    tensor& transpose();
 };

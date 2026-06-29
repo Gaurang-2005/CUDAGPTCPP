@@ -272,4 +272,177 @@ tensor<t>& tensor<t>::operator-=(tensor& other) {
     return *this;
 }
 
+template <typename t>
+__global__ void multiplyKernel(size_t storageLength, t* tensA, t* tensB) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
+    if (idx < storageLength) {
+        tensA[idx] *= tensB[idx];
+    }
+}
+
+template <typename t>
+tensor<t> tensor<t>::operator*(tensor& other) {
+    if (shape != other.shape){
+        throw std::invalid_argument("Tensors must have the same shape for multiplication.");
+    }
+    if (dev == device::CPU || other.dev == device::CPU) {
+        toGPU();
+        other.toGPU();
+    }
+    tensor<t> temp(*this);
+    multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    return temp;
+}
+
+template <typename t>
+tensor<t>& tensor<t>::operator*=(tensor& other) {
+    if (shape != other.shape){
+        throw std::invalid_argument("Tensors must have the same shape for multiplication.");
+    }
+    if (dev == device::CPU || other.dev == device::CPU) {
+        toGPU();
+        other.toGPU();
+    }
+    multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens, other.tens);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    return *this;
+}
+
+template <typename t>
+__global__ void divideKernel(size_t storageLength, t* tensA, t* tensB) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx] /= tensB[idx];
+    }
+}
+
+template <typename t>
+tensor<t> tensor<t>::operator/(tensor& other) {
+    if (shape != other.shape){
+        throw std::invalid_argument("Tensors must have the same shape for division.");
+    }
+    if (dev == device::CPU || other.dev == device::CPU) {
+        toGPU();
+        other.toGPU();
+    }
+    tensor<t> temp(*this);
+    divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    return temp;
+}
+
+template <typename t>
+tensor<t>& tensor<t>::operator/=(tensor& other) {
+    if (shape != other.shape){
+        throw std::invalid_argument("Tensors must have the same shape for division.");
+    }
+    if (dev == device::CPU || other.dev == device::CPU) {
+        toGPU();
+        other.toGPU();
+    }
+    divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens, other.tens);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    return *this;
+}
+
+template <typename t>
+void tensor<t>::print() const {
+    if (storageLength == 0) {
+        std::cout << "Empty Tensor\n";
+        return;
+    }       
+    t* tempData = nullptr;
+    if (dev == device::GPU) {
+        tempData = new t[storageLength];
+        cudaError_t err = cudaMemcpy(tempData, tens, storageLength * sizeof(t), cudaMemcpyDeviceToHost);
+        if (err != cudaSuccess) {
+            std::cerr << "Memory copy failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            return;
+        }
+    }
+    else {
+        tempData = tens;
+    }
+    std::cout<<"Tensor shape: (";
+    for (size_t i = 0; i < shape.size(); ++i) {
+        std::cout << shape[i];
+        if (i != shape.size() - 1) {
+            std::cout << ", ";
+        }
+    }
+    std::cout << "), device: " << (dev == device::CPU ? "CPU" : "GPU") << std::endl << std::endl;
+    for (size_t i = 0; i < storageLength; ++i) {
+        std::cout << tempData[i] << " ";
+    }
+    std::cout << std::endl;
+    if (dev == device::GPU) {
+        delete[] tempData;
+    }
+}
+
+template <typename t>
+__global__ void transposeKernel(t* temp, t* tens, size_t storageLength, size_t x, size_t y) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx >= storageLength) return;
+
+    size_t xOld = idx / y;
+    size_t yOld = idx % y;
+
+    temp[yOld * x + xOld] = tens[idx];
+}
+
+template <typename t>
+tensor<t> tensor<t>::transposed() {
+    if (shape.size() != 2) {
+        throw std::invalid_argument("transposed() currently supports only rank-2 tensors.");
+    }
+    if (dev == device::CPU) {
+        toGPU();
+    }
+    tensor<t> temp(device::GPU, shape[1], shape[0]);
+    transposeKernel<<<cuda::ceil_div(storageLength, 256), 256>>> (temp.tens, tens, storageLength, shape[0], shape[1]);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    return temp;
+}
+
+template <typename t>
+tensor<t>& tensor<t>::transpose() {
+    *this = transposed();
+    return *this;
+}

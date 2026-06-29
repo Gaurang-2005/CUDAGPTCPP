@@ -455,3 +455,42 @@ tensor<t>& tensor<t>::transpose() {
     *this = transposed();
     return *this;
 }
+
+template <typename t>
+__global__ void matMulKernel(t* output, t* A, t* B, size_t com, size_t outY, size_t storageLength) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= storageLength) return;
+    size_t Ax = idx / outY;
+    size_t By = idx % outY;
+    output[idx] = 0;
+    for (size_t i = 0; i < com; i++) {
+        output[idx] += A[Ax * com + i] * B[i * outY + By];
+    }
+
+} 
+
+template <typename t>
+tensor<t> tensor<t>::matMul(tensor<t>& other) {
+    if (shape[1] != other.shape[0]) {
+        throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
+    }
+    if (shape.size() != 2 || other.shape.size() != 2) {
+        throw std::invalid_argument("Matrix multiplication currently only supports rank-2 tensors");
+    }
+
+    toGPU();
+    other.toGPU();
+
+    tensor<t> out(device::GPU, shape[0], other.shape[1]);
+
+    matMulKernel<<<cuda::ceil_div(shape[0]*other.shape[1], 256), 256>>>(out.tens, tens, other.tens, shape[1], out.shape[1], out.storageLength);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    return out;
+}

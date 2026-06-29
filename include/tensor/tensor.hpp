@@ -132,4 +132,6 @@ public:
     void print() const;
     tensor transposed();
     tensor& transpose();
+
+    tensor matMul(tensor<t>& other);
 };

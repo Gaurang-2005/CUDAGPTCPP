@@ -8,6 +8,18 @@ template class tensor<float>;
 template class tensor<double>;
 
 template <typename t>
+void tensor<t>::constructorAllocate() {
+    if (tens) return;
+
+    cudaError_t err = cudaMalloc(&tens, storageLength * sizeof(t));
+    if (err != cudaSuccess) {
+        std::cerr << "cudaMalloc failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+}
+
+template <typename t>
 void tensor<t>::toGPU() {
     if (dev == device::GPU) {
         return; 
@@ -71,7 +83,6 @@ template <typename t>
 tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), storageLength(other.storageLength), tens(other.tens), dev(other.dev) {
     other.tens = nullptr;
     other.storageLength = 0;
-    other.dev = device::CPU;
 }
 
 template <typename t>
@@ -118,7 +129,6 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
         dev = other.dev;
         other.tens = nullptr;
         other.storageLength = 0;
-        other.dev = device::CPU;
     }
     return *this;
 }
@@ -414,7 +424,6 @@ __global__ void transposeKernel(t* temp, t* tens, size_t storageLength, size_t x
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx >= storageLength) return;
-
     size_t xOld = idx / y;
     size_t yOld = idx % y;
 

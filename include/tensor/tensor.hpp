@@ -26,7 +26,7 @@ public:
         tens = new t[storageLength];
 
         else if (dev == device::GPU) {
-            toGPU();
+            constructorAllocate();
         }
     }
     template <typename ... Args>
@@ -41,6 +41,7 @@ public:
         return tens;
     }
 
+    void constructorAllocate();
     void toGPU();
     void toCPU();
 

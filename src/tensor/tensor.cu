@@ -457,16 +457,35 @@ tensor<t>& tensor<t>::transpose() {
 }
 
 template <typename t>
-__global__ void matMulKernel(t* output, t* A, t* B, size_t com, size_t outY, size_t storageLength) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= storageLength) return;
-    size_t Ax = idx / outY;
-    size_t By = idx % outY;
-    output[idx] = 0;
-    for (size_t i = 0; i < com; i++) {
-        output[idx] += A[Ax * com + i] * B[i * outY + By];
-    }
+__global__ void matMulKernel(t* output, t* A, t* B, size_t com, size_t outY, size_t outX, size_t storageLength) {
+    constexpr int tileSize = 16;
+    __shared__ t At[tileSize][tileSize];
+    __shared__ t Bt[tileSize][tileSize];
+    size_t row = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t col = blockIdx.x * blockDim.x + threadIdx.x;
+    // printf("kernel running! %d %d", row, col);
+    t sum = 0;
+    for (int i = 0; i < cuda::ceil_div(com, tileSize); i++) {
+        size_t common = i * tileSize;
+        size_t Ay = row;
+        if (common + threadIdx.x < com && Ay < outY) {
+            At[threadIdx.y][threadIdx.x] = A[common + threadIdx.x + Ay * com];
+        }
+        else At[threadIdx.y][threadIdx.x] = 0;
+        size_t Bx = col;
+        if (common + threadIdx.y < com && Bx < outX) {
+            Bt[threadIdx.y][threadIdx.x] = B[(common + threadIdx.y) * outX + Bx];
+        }
+        else Bt[threadIdx.y][threadIdx.x] = 0;
 
+        __syncthreads();
+        for (int j = 0; j < tileSize; j++) {
+            sum += At[threadIdx.y][j] * Bt[j][threadIdx.x];
+        }
+        __syncthreads();
+    }
+    if (row < outY && col < outX)
+    output[col + row * outX] = sum;
 } 
 
 template <typename t>
@@ -482,8 +501,11 @@ tensor<t> tensor<t>::matMul(tensor<t>& other) {
     other.toGPU();
 
     tensor<t> out(device::GPU, shape[0], other.shape[1]);
-
-    matMulKernel<<<cuda::ceil_div(shape[0]*other.shape[1], 256), 256>>>(out.tens, tens, other.tens, shape[1], out.shape[1], out.storageLength);
+    constexpr int tileSize = 16;
+    dim3 blockSize = dim3(tileSize, tileSize, 1);
+    dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
+    // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1], out.storageLength);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

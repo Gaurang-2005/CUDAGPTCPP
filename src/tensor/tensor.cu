@@ -54,6 +54,7 @@ void tensor<t>::toCPU() {
 
 template <typename t>
 tensor<t>::~tensor() {
+    if (isGradEnabled) delete gradFunction;
     if (dev == device::GPU) {
         cudaFree(tens);
     }
@@ -219,26 +220,14 @@ tensor<t> tensor<t>::operator+(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
+    temp.gradFunction = new addNode<t>(this, &other);
+
     return temp;
 }
 
 template <typename t>
 tensor<t>& tensor<t>::operator+=(tensor& other) {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for addition.");
-    }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
-    addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens, other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-    }
+    *this = *this + other;
     return *this;
 }
 template <typename t>
@@ -259,26 +248,14 @@ tensor<t> tensor<t>::operator-(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
+    temp.gradFunction = new subtractNode<t>(this, &other);
+
     return temp;
 }
 
 template <typename t>
 tensor<t>& tensor<t>::operator-=(tensor& other) {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for subtraction.");
-    }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
-    subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens, other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-    }
+    *this = *this - other;
     return *this;
 }
 
@@ -309,26 +286,14 @@ tensor<t> tensor<t>::operator*(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
+    temp.gradFunction = new multiplyNode<t>(this, &other);
+
     return temp;
 }
 
 template <typename t>
 tensor<t>& tensor<t>::operator*=(tensor& other) {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for multiplication.");
-    }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
-    multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens, other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-    }
+    *this = *this * other;
     return *this;
 }
 
@@ -359,26 +324,14 @@ tensor<t> tensor<t>::operator/(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
+    temp.gradFunction = new divideNode<t>(this, &other);
+
     return temp;
 }
 
 template <typename t>
 tensor<t>& tensor<t>::operator/=(tensor& other) {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for division.");
-    }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
-    divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens, other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-    }
+    *this = *this / other;
     return *this;
 }
 
@@ -513,6 +466,7 @@ tensor<t> tensor<t>::matMul(tensor<t>& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
+    out.gradFunction = new matMulNode<t>(this, &other);
 
     return out;
 }

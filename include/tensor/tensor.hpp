@@ -2,6 +2,7 @@
 #include <vector>
 #include <concepts>
 #include <cassert>
+#include "autograd/node.hpp"
 
 enum class device {
     CPU,
@@ -14,6 +15,9 @@ class tensor {
     size_t storageLength = 1;
     t* tens = nullptr;
     device dev;
+    bool isGradEnabled = false;
+    node* gradFunction = nullptr;
+    tensor* grad = nullptr;
 public:
     template <typename ... Args>
     requires (std::integral<Args> && ...)
@@ -40,7 +44,7 @@ public:
     const t* data() const {
         return tens;
     }
-
+    tensor() = default;
     void constructorAllocate();
     void toGPU();
     void toCPU();
@@ -134,4 +138,16 @@ public:
     tensor& transpose();
 
     tensor matMul(tensor<t>& other);
+
+    void requiresGrad(bool val) {
+        isGradEnabled = val;
+    }
+
+    bool requiresGrad() const {
+        return isGradEnabled;
+    }
+
+    void backward() {
+        if (gradFunction) gradFunction->backward();
+    }
 };

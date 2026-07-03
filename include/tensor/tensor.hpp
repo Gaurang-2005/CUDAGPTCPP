@@ -21,7 +21,7 @@ class tensor {
 public:
     template <typename ... Args>
     requires (std::integral<Args> && ...)
-    tensor(device dev, Args...args) : shape({args...}), dev(dev) {
+    tensor(device dev, Args...args) : shape({static_cast<size_t>(args)...}), dev(dev) {
 
         for (auto& i : shape) {
             storageLength*=i;
@@ -36,7 +36,7 @@ public:
     template <typename ... Args>
     requires (std::integral<Args> && ...)
     tensor(Args...args) : tensor(device::CPU, args...) {}
-
+    tensor() : tensor(device::CPU, 1, 1) {}
     t* data() {
         return tens;
     }
@@ -44,7 +44,6 @@ public:
     const t* data() const {
         return tens;
     }
-    tensor() = default;
     void constructorAllocate();
     void toGPU();
     void toCPU();
@@ -124,6 +123,7 @@ public:
     template <typename ... Args>
     requires (std::integral<Args> && ...)
     void reshape(Args...args) {
+        if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
         std::vector<size_t> newShape = {static_cast<size_t>(args)...};
         size_t newStorageLength = 1;
         for (auto& i : newShape) {
@@ -131,6 +131,23 @@ public:
         }
         assert(newStorageLength == storageLength);
         shape = newShape;
+    }
+
+    template <typename ... Args>
+    requires (std::integral<Args> && ...)
+    tensor reshaped(Args...args) const {
+        tensor<t> temp(*this);
+        temp.shape = std::vector<size_t>({static_cast<size_t>(args)...});
+        size_t newStorageLength = 1;
+        for (auto& i : temp.shape) {
+            newStorageLength *= i;
+        }
+        assert(newStorageLength == storageLength);
+        if (isGradEnabled) {
+            temp.gradFunction = new reshapeNode<t>(this, shape);
+            temp.isGradEnabled = true;
+        }
+        return temp;
     }
 
     void print() const;
@@ -149,5 +166,17 @@ public:
 
     void backward() {
         if (gradFunction) gradFunction->backward();
+    }
+
+    tensor sum();
+
+    tensor mean() {
+        tensor<t> out = sum();
+        out.tens[0] /= storageLength;
+        if (isGradEnabled) {
+            delete out.gradFunction;
+            out.gradFunction = new meanNode<t>(this);
+        }
+        return out;
     }
 };

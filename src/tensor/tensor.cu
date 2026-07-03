@@ -78,12 +78,21 @@ tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other
         }
         cudaMemcpy(tens, other.tens, storageLength * sizeof(t), cudaMemcpyDefault);
     }
+    isGradEnabled = other.isGradEnabled;
+    grad = other.grad;
+    gradFunction = other.gradFunction;
 }
 
 template <typename t>
 tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), storageLength(other.storageLength), tens(other.tens), dev(other.dev) {
     other.tens = nullptr;
     other.storageLength = 0;
+    isGradEnabled = other.isGradEnabled;
+    grad = other.grad;
+    gradFunction = other.gradFunction;
+    other.isGradEnabled = false;
+    other.grad = nullptr;
+    other.gradFunction = nullptr;
 }
 
 template <typename t>
@@ -98,6 +107,9 @@ tensor<t>& tensor<t>::operator=(const tensor& other) {
         shape = other.shape;
         storageLength = other.storageLength;
         dev = other.dev;
+        isGradEnabled = other.isGradEnabled;
+        grad = other.grad;
+        gradFunction = other.gradFunction;
         if (dev == device::CPU) {
             tens = new t[storageLength];
             std::copy(other.tens, other.tens + storageLength, tens);
@@ -128,8 +140,14 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
         storageLength = other.storageLength;
         tens = other.tens;
         dev = other.dev;
+        isGradEnabled = other.isGradEnabled;
+        grad = other.grad;
+        gradFunction = other.gradFunction;
         other.tens = nullptr;
         other.storageLength = 0;
+        other.isGradEnabled = false;
+        other.grad = nullptr;
+        other.gradFunction = nullptr;
     }
     return *this;
 }
@@ -220,13 +238,16 @@ tensor<t> tensor<t>::operator+(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    temp.gradFunction = new addNode<t>(this, &other);
-
+    if (isGradEnabled) {
+        temp.gradFunction = new addNode<t>(this, &other);
+        temp.isGradEnabled = true;
+    }
     return temp;
 }
 
 template <typename t>
 tensor<t>& tensor<t>::operator+=(tensor& other) {
+    if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
     *this = *this + other;
     return *this;
 }
@@ -248,13 +269,16 @@ tensor<t> tensor<t>::operator-(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    temp.gradFunction = new subtractNode<t>(this, &other);
-
+    if (isGradEnabled) {
+        temp.gradFunction = new subtractNode<t>(this, &other);
+        temp.isGradEnabled = true;
+    }
     return temp;
 }
 
 template <typename t>
 tensor<t>& tensor<t>::operator-=(tensor& other) {
+    if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
     *this = *this - other;
     return *this;
 }
@@ -286,13 +310,16 @@ tensor<t> tensor<t>::operator*(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    temp.gradFunction = new multiplyNode<t>(this, &other);
-
+    if (isGradEnabled) {
+        temp.gradFunction = new multiplyNode<t>(this, &other);
+        temp.isGradEnabled = true;
+    }
     return temp;
 }
 
 template <typename t>
 tensor<t>& tensor<t>::operator*=(tensor& other) {
+    if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
     *this = *this * other;
     return *this;
 }
@@ -324,13 +351,16 @@ tensor<t> tensor<t>::operator/(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    temp.gradFunction = new divideNode<t>(this, &other);
-
+    if (isGradEnabled) {
+        temp.gradFunction = new divideNode<t>(this, &other);
+        temp.isGradEnabled = true;
+    }
     return temp;
 }
 
 template <typename t>
 tensor<t>& tensor<t>::operator/=(tensor& other) {
+    if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
     *this = *this / other;
     return *this;
 }
@@ -400,11 +430,16 @@ tensor<t> tensor<t>::transposed() {
                 << cudaGetErrorString(err)
                 << '\n';
     }
+    if (isGradEnabled) {
+        temp.gradFunction = new transposeNode<t>(this);
+        temp.isGradEnabled = true;
+    }
     return temp;
 }
 
 template <typename t>
 tensor<t>& tensor<t>::transpose() {
+    if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
     *this = transposed();
     return *this;
 }
@@ -466,7 +501,56 @@ tensor<t> tensor<t>::matMul(tensor<t>& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    out.gradFunction = new matMulNode<t>(this, &other);
-
+    if (isGradEnabled) {
+        out.gradFunction = new matMulNode<t>(this, &other);
+        out.isGradEnabled = true;
+    }
     return out;
 }
+
+template<typename t>
+__global__ void sumKernel(t* out, t* tens, size_t storageLength) {
+    size_t idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (idx < storageLength) {
+
+        __shared__ t tempStore[256];
+
+        tempStore[threadIdx.x] = tens[idx];
+        __syncthreads();
+        for (int i = 1; i < 256; i*=2) {
+            if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256)) 
+            tempStore[threadIdx.x] += tempStore[threadIdx.x + i];
+            __syncthreads();
+        }
+        if (threadIdx.x == 0) out[blockIdx.x] = tempStore[0];
+    }
+}
+
+template<typename t>
+tensor<t> tensor<t>::sum() {
+    if (dev == device::CPU) toGPU();
+
+    tensor<t> out(device::CPU, 1, 1);
+    size_t blocks = cuda::ceil_div(storageLength, 256);
+    t* tempOut;
+    cudaMallocManaged(&tempOut, sizeof(t)*blocks);
+    sumKernel <<<blocks, 256>>> (tempOut, tens, storageLength);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }    
+    out.tens[0] = 0;
+    for (int i = 0; i < blocks; i++) {
+        out.tens[0] += tempOut[i]; 
+    }
+    if (isGradEnabled) {
+        out.gradFunction = new sumNode<t>(this);
+        out.isGradEnabled = true;
+    }
+    return out;
+}
+

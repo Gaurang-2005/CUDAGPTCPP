@@ -132,49 +132,70 @@ void benchmarkMatMul(size_t M,
     }
 }
 
-int main()
-{
-    std::cout << "=========================================\n";
-    std::cout << " CUDA-GPT Matrix Multiplication Test Suite\n";
-    std::cout << "=========================================\n";
+// int main()
+// {
+//     std::cout << "=========================================\n";
+//     std::cout << " CUDA-GPT Matrix Multiplication Test Suite\n";
+//     std::cout << "=========================================\n";
 
-    std::cout << "\n========== Correctness Tests ==========\n";
+//     std::cout << "\n========== Correctness Tests ==========\n";
 
-    // Small square matrices
-    benchmarkMatMul<float>(2, 2, 2, true);
-    benchmarkMatMul<float>(3, 3, 3, true);
-    benchmarkMatMul<float>(7, 7, 7, true);
+//     // Small square matrices
+//     benchmarkMatMul<float>(2, 2, 2, true);
+//     benchmarkMatMul<float>(3, 3, 3, true);
+//     benchmarkMatMul<float>(7, 7, 7, true);
 
-    // Tile boundary tests
-    benchmarkMatMul<float>(15, 15, 15, true);
-    benchmarkMatMul<float>(16, 16, 16, true);
-    benchmarkMatMul<float>(17, 17, 17, true);
+//     // Tile boundary tests
+//     benchmarkMatMul<float>(15, 15, 15, true);
+//     benchmarkMatMul<float>(16, 16, 16, true);
+//     benchmarkMatMul<float>(17, 17, 17, true);
 
-    benchmarkMatMul<float>(31, 31, 31, true);
-    benchmarkMatMul<float>(32, 32, 32, true);
-    benchmarkMatMul<float>(33, 33, 33, true);
+//     benchmarkMatMul<float>(31, 31, 31, true);
+//     benchmarkMatMul<float>(32, 32, 32, true);
+//     benchmarkMatMul<float>(33, 33, 33, true);
 
-    // Rectangular matrices
-    benchmarkMatMul<float>(8, 16, 4, true);
-    benchmarkMatMul<float>(16, 8, 32, true);
-    benchmarkMatMul<float>(17, 19, 23, true);
-    benchmarkMatMul<float>(31, 47, 29, true);
-    benchmarkMatMul<float>(64, 31, 17, true);
-    benchmarkMatMul<float>(127, 65, 33, true);
-    benchmarkMatMul<float>(129, 128, 131, true);
-    benchmarkMatMul<float>(257, 129, 65, true);
+//     // Rectangular matrices
+//     benchmarkMatMul<float>(8, 16, 4, true);
+//     benchmarkMatMul<float>(16, 8, 32, true);
+//     benchmarkMatMul<float>(17, 19, 23, true);
+//     benchmarkMatMul<float>(31, 47, 29, true);
+//     benchmarkMatMul<float>(64, 31, 17, true);
+//     benchmarkMatMul<float>(127, 65, 33, true);
+//     benchmarkMatMul<float>(129, 128, 131, true);
+//     benchmarkMatMul<float>(257, 129, 65, true);
 
-    std::cout << "\n========== Performance Benchmarks ==========\n";
+//     std::cout << "\n========== Performance Benchmarks ==========\n";
 
-    benchmarkMatMul<float>(256, 256, 256, true);
-    benchmarkMatMul<float>(512, 512, 512, false);
-    benchmarkMatMul<float>(1024, 1024, 1024, false);
-    benchmarkMatMul<float>(2048, 2048, 2048, false);
-    benchmarkMatMul<float>(10000, 10000, 10000, false);
+//     benchmarkMatMul<float>(256, 256, 256, true);
+//     benchmarkMatMul<float>(512, 512, 512, false);
+//     benchmarkMatMul<float>(1024, 1024, 1024, false);
+//     benchmarkMatMul<float>(2048, 2048, 2048, false);
+//     benchmarkMatMul<float>(10000, 10000, 10000, false);
 
-    std::cout << "\n=========================================\n";
-    std::cout << "All tests completed successfully.\n";
-    std::cout << "=========================================\n";
+//     std::cout << "\n=========================================\n";
+//     std::cout << "All tests completed successfully.\n";
+//     std::cout << "=========================================\n";
 
-    return 0;
+//     return 0;
+// }
+
+double sumCheck(double* data, size_t storageLength) {
+    double sum = 0;
+    for (int i = 0; i < storageLength; i++) {
+        sum += data[i];
+    }
+    return sum;
+}
+
+int main() {
+    tensor<double> test(4096, 4096);
+    // for (int i = 1; i <= test.numelements(); i++) {
+    //     test.data()[i-1] = i;
+    // }
+    test.ones();
+    tensor<double> sumGPU = test.sum();
+    test.toCPU();
+    double sumCPU = sumCheck(test.data(), test.numelements());
+
+    std::cout << "sumCPU: " << sumCPU << " and sumGPU: " << sumGPU.data()[0] << std::endl;
 }

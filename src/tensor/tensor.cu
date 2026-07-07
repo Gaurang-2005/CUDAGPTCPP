@@ -20,7 +20,7 @@ void tensor<t>::constructorAllocate() {
 }
 
 template <typename t>
-void tensor<t>::toGPU() {
+void tensor<t>::toGPU() const {
     if (dev == device::GPU) {
         return; 
     }
@@ -41,7 +41,7 @@ void tensor<t>::toGPU() {
 }
 
 template <typename t>
-void tensor<t>::toCPU() {
+void tensor<t>::toCPU() const {
     if (dev == device::CPU) {
         return; 
     }
@@ -54,7 +54,6 @@ void tensor<t>::toCPU() {
 
 template <typename t>
 tensor<t>::~tensor() {
-    if (isGradEnabled) delete gradFunction;
     if (dev == device::GPU) {
         cudaFree(tens);
     }
@@ -108,6 +107,7 @@ tensor<t>& tensor<t>::operator=(const tensor& other) {
         storageLength = other.storageLength;
         dev = other.dev;
         isGradEnabled = other.isGradEnabled;
+        delete grad;
         grad = other.grad;
         gradFunction = other.gradFunction;
         if (dev == device::CPU) {
@@ -136,6 +136,7 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
         else if (dev == device::CPU) {
             delete[] tens;
         }
+        delete grad;
         shape = std::move(other.shape);
         storageLength = other.storageLength;
         tens = other.tens;
@@ -221,7 +222,7 @@ __global__ void subtractKernel(size_t storageLength, t* tensA, t* tensB) {
 }
 
 template <typename t>
-tensor<t> tensor<t>::operator+(tensor& other) {
+tensor<t> tensor<t>::operator+(const tensor& other) const {
     if (shape != other.shape){
         throw std::invalid_argument("Tensors must have the same shape for addition.");
     }
@@ -238,21 +239,21 @@ tensor<t> tensor<t>::operator+(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    if (isGradEnabled) {
-        temp.gradFunction = new addNode<t>(this, &other);
+    if (isGradEnabled || other.isGradEnabled) {
+        temp.gradFunction = std::make_shared<addNode<t>>(this, &other);
         temp.isGradEnabled = true;
     }
     return temp;
 }
 
 template <typename t>
-tensor<t>& tensor<t>::operator+=(tensor& other) {
-    if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
+tensor<t>& tensor<t>::operator+=(const tensor& other) {
+    if (isGradEnabled || other.isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
     *this = *this + other;
     return *this;
 }
 template <typename t>
-tensor<t> tensor<t>::operator-(tensor& other) {
+tensor<t> tensor<t>::operator-(const tensor& other) const {
     if (shape != other.shape){
         throw std::invalid_argument("Tensors must have the same shape for subtraction.");
     }
@@ -269,16 +270,16 @@ tensor<t> tensor<t>::operator-(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    if (isGradEnabled) {
-        temp.gradFunction = new subtractNode<t>(this, &other);
+    if (isGradEnabled || other.isGradEnabled) {
+        temp.gradFunction = std::make_shared<subtractNode<t>>(this, &other);
         temp.isGradEnabled = true;
     }
     return temp;
 }
 
 template <typename t>
-tensor<t>& tensor<t>::operator-=(tensor& other) {
-    if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
+tensor<t>& tensor<t>::operator-=(const tensor& other) {
+    if (isGradEnabled || other.isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
     *this = *this - other;
     return *this;
 }
@@ -293,7 +294,7 @@ __global__ void multiplyKernel(size_t storageLength, t* tensA, t* tensB) {
 }
 
 template <typename t>
-tensor<t> tensor<t>::operator*(tensor& other) {
+tensor<t> tensor<t>::operator*(const tensor& other) const {
     if (shape != other.shape){
         throw std::invalid_argument("Tensors must have the same shape for multiplication.");
     }
@@ -310,16 +311,16 @@ tensor<t> tensor<t>::operator*(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    if (isGradEnabled) {
-        temp.gradFunction = new multiplyNode<t>(this, &other);
+    if (isGradEnabled || other.isGradEnabled) {
+        temp.gradFunction = std::make_shared<multiplyNode<t>>(this, &other);
         temp.isGradEnabled = true;
     }
     return temp;
 }
 
 template <typename t>
-tensor<t>& tensor<t>::operator*=(tensor& other) {
-    if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
+tensor<t>& tensor<t>::operator*=(const tensor& other) {
+    if (isGradEnabled || other.isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
     *this = *this * other;
     return *this;
 }
@@ -334,7 +335,7 @@ __global__ void divideKernel(size_t storageLength, t* tensA, t* tensB) {
 }
 
 template <typename t>
-tensor<t> tensor<t>::operator/(tensor& other) {
+tensor<t> tensor<t>::operator/(const tensor& other) const {
     if (shape != other.shape){
         throw std::invalid_argument("Tensors must have the same shape for division.");
     }
@@ -351,16 +352,16 @@ tensor<t> tensor<t>::operator/(tensor& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    if (isGradEnabled) {
-        temp.gradFunction = new divideNode<t>(this, &other);
+    if (isGradEnabled || other.isGradEnabled) {
+        temp.gradFunction = std::make_shared<divideNode<t>>(this, &other);
         temp.isGradEnabled = true;
     }
     return temp;
 }
 
 template <typename t>
-tensor<t>& tensor<t>::operator/=(tensor& other) {
-    if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
+tensor<t>& tensor<t>::operator/=(const tensor& other) {
+    if (isGradEnabled || other.isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
     *this = *this / other;
     return *this;
 }
@@ -414,7 +415,7 @@ __global__ void transposeKernel(t* temp, t* tens, size_t storageLength, size_t x
 }
 
 template <typename t>
-tensor<t> tensor<t>::transposed() {
+tensor<t> tensor<t>::transposed() const {
     if (shape.size() != 2) {
         throw std::invalid_argument("transposed() currently supports only rank-2 tensors.");
     }
@@ -431,7 +432,7 @@ tensor<t> tensor<t>::transposed() {
                 << '\n';
     }
     if (isGradEnabled) {
-        temp.gradFunction = new transposeNode<t>(this);
+        temp.gradFunction = std::make_shared<transposeNode<t>>(this);
         temp.isGradEnabled = true;
     }
     return temp;
@@ -477,13 +478,15 @@ __global__ void matMulKernel(t* output, t* A, t* B, size_t com, size_t outY, siz
 } 
 
 template <typename t>
-tensor<t> tensor<t>::matMul(tensor<t>& other) {
+tensor<t> tensor<t>::matMul(const tensor<t>& other) const {
     if (shape[1] != other.shape[0]) {
         throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
     }
     if (shape.size() != 2 || other.shape.size() != 2) {
         throw std::invalid_argument("Matrix multiplication currently only supports rank-2 tensors");
     }
+    if (isIdentity) return other;
+    if (other.isIdentity) return *this;
 
     toGPU();
     other.toGPU();
@@ -501,8 +504,8 @@ tensor<t> tensor<t>::matMul(tensor<t>& other) {
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    if (isGradEnabled) {
-        out.gradFunction = new matMulNode<t>(this, &other);
+    if (isGradEnabled || other.isGradEnabled) {
+        out.gradFunction = std::make_shared<matMulNode<t>>(this, &other);
         out.isGradEnabled = true;
     }
     return out;
@@ -542,15 +545,57 @@ tensor<t> tensor<t>::sum() {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
-    }    
+    } 
     out.tens[0] = 0;
     for (int i = 0; i < blocks; i++) {
         out.tens[0] += tempOut[i]; 
     }
+    cudaFree(tempOut);
     if (isGradEnabled) {
-        out.gradFunction = new sumNode<t>(this);
+        out.gradFunction = std::make_shared<sumNode<t>>(this);
         out.isGradEnabled = true;
     }
     return out;
+}
+
+template <typename t>
+__global__ void identityKernel(t* tens, size_t x, size_t y) {
+    size_t idX = threadIdx.x + blockIdx.x * blockDim.x;
+    size_t idY = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (idX >= x || idY >= y) return;
+
+    if (idX == idY) tens[idX + idY * x] = 1;
+    else tens[idX + idY * x] = 0;
+}
+
+template <typename t>
+void tensor<t>::identity() {
+    toGPU();
+    dim3 gridSize = dim3(cuda::ceil_div(shape[0], 16), cuda::ceil_div(shape[1], 16));
+    dim3 blockSize = dim3(16, 16);
+    isIdentity = true;
+    identityKernel <<<gridSize, blockSize>>> (tens, shape[0], shape[1]);
+    cudaDeviceSynchronize();
+}
+
+template <typename t>
+__global__ void negateKernel(t* tens, size_t storageLength) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    tens[idx] *= -1;
+}
+template <typename t>
+tensor<t> tensor<t>::operator-() {
+    tensor<t> temp(*this);
+
+    temp.toGPU();
+
+    negateKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(temp.tens, storageLength);
+    cudaDeviceSynchronize();
+
+    return temp;
 }
 

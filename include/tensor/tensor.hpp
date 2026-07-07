@@ -13,11 +13,12 @@ template <typename t>
 class tensor {
     std::vector<size_t> shape;
     size_t storageLength = 1;
-    t* tens = nullptr;
-    device dev;
-    bool isGradEnabled = false;
-    node* gradFunction = nullptr;
-    tensor* grad = nullptr;
+    mutable t* tens = nullptr;
+    mutable device dev;
+    mutable bool isGradEnabled = false;
+    mutable std::shared_ptr<node<t>> gradFunction = nullptr;
+    mutable tensor* grad = nullptr;
+    bool isIdentity = false;
 public:
     template <typename ... Args>
     requires (std::integral<Args> && ...)
@@ -40,13 +41,30 @@ public:
     t* data() {
         return tens;
     }
-
+    tensor*& gradient() {
+        return grad;
+    }
+    tensor* gradient() const {
+        return grad;
+    }
     const t* data() const {
         return tens;
     }
+    std::shared_ptr<node<t>> gradientFunction() {
+        return gradFunction;
+    }
+    const std::shared_ptr<node<t>> gradientFunction() const {
+        return gradFunction;
+    }
+    void setGradient(tensor<t>* gradient) const {
+        grad = gradient;
+    }
+    void setGradientFunction(std::shared_ptr<node<t>> gradFunction) const {
+        this->gradFunction = gradFunction;
+    }
     void constructorAllocate();
-    void toGPU();
-    void toCPU();
+    void toGPU() const;
+    void toCPU() const;
 
     tensor(const tensor& other);
     tensor(tensor&& other) noexcept;
@@ -83,7 +101,7 @@ public:
     size_t rank() const {
         return shape.size();
     }
-    size_t numelements() const {
+    size_t numElements() const {
         return storageLength;
     }
     const std::vector<size_t>& getShape() const {
@@ -111,14 +129,14 @@ public:
         return storageLength == 0;
     }
 
-    tensor& operator+=(tensor& other);
-    tensor& operator-=(tensor& other);
-    tensor operator+(tensor& other);
-    tensor operator-(tensor& other);
-    tensor& operator*=(tensor& other);
-    tensor& operator/=(tensor& other);
-    tensor operator*(tensor& other);
-    tensor operator/(tensor& other);
+    tensor& operator+=(const tensor& other);
+    tensor& operator-=(const tensor& other);
+    tensor operator+(const tensor& other) const;
+    tensor operator-(const tensor& other) const;
+    tensor& operator*=(const tensor& other);
+    tensor& operator/=(const tensor& other);
+    tensor operator*(const tensor& other) const;
+    tensor operator/(const tensor& other) const;
 
     template <typename ... Args>
     requires (std::integral<Args> && ...)
@@ -144,19 +162,19 @@ public:
         }
         assert(newStorageLength == storageLength);
         if (isGradEnabled) {
-            temp.gradFunction = new reshapeNode<t>(this, shape);
+            temp.gradFunction = std::make_shared<reshapeNode<t>>(this, shape);
             temp.isGradEnabled = true;
         }
         return temp;
     }
 
     void print() const;
-    tensor transposed();
+    tensor transposed() const;
     tensor& transpose();
 
-    tensor matMul(tensor<t>& other);
+    tensor matMul(const tensor<t>& other) const;
 
-    void requiresGrad(bool val) {
+    void requiresGrad(bool val) const {
         isGradEnabled = val;
     }
 
@@ -164,19 +182,40 @@ public:
         return isGradEnabled;
     }
 
-    void backward() {
-        if (gradFunction) gradFunction->backward();
-    }
-
+    void identity();
     tensor sum();
-
+    tensor operator-();
     tensor mean() {
-        tensor<t> out = sum();
-        out.tens[0] /= storageLength;
+        tensor<t> out;
         if (isGradEnabled) {
-            delete out.gradFunction;
-            out.gradFunction = new meanNode<t>(this);
+            isGradEnabled = false;
+            out = sum();
+            out.tens[0] /= storageLength;
+            isGradEnabled = true;
+        }
+        else {
+            tensor<t> out = sum();
+            out.tens[0] /= storageLength;
+        }
+        if (isGradEnabled) {
+            out.isGradEnabled = true;
+            out.gradFunction = std::make_shared<meanNode<t>>(this);
         }
         return out;
     }
+
+    void backward() {
+        if (!isGradEnabled) throw std::invalid_argument("Gradient is not enabled on this tensor, so backward failed!");
+
+        if (grad) {
+            delete grad;
+        }
+
+        grad = new tensor(device::GPU, shape[0], shape[1]);
+        grad->ones();
+
+        if (gradFunction) gradFunction -> backward(*this);
+    }
+
+    tensor operator-() const;
 };

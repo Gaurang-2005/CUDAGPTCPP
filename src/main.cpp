@@ -195,7 +195,7 @@ int main() {
     test.ones();
     tensor<double> sumGPU = test.sum();
     test.toCPU();
-    double sumCPU = sumCheck(test.data(), test.numelements());
+    double sumCPU = sumCheck(test.data(), test.numElements());
 
     std::cout << "sumCPU: " << sumCPU << " and sumGPU: " << sumGPU.data()[0] << std::endl;
 }

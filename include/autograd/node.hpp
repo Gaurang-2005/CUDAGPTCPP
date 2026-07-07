@@ -1,174 +1,161 @@
+#pragma once
+
 #include <vector>
 
 template <typename t>
 class tensor;
 
+template<typename t>
 class node {
 public:
     virtual ~node() = default;
 
-    virtual void backward() = 0;
+    virtual void backward(const tensor<t>& owner) = 0;
 };
 
 template<typename t>
-class addNode : public node {
-    tensor<t>* A;
-    tensor<t>* B;
+class addNode : public node<t> {
+    const tensor<t>* A;
+    const tensor<t>* B;
 public:
-    addNode(tensor<t>* A, tensor<t>* B) : A(A), B(B) {}
-
-    void backward() override {}
+    addNode(const tensor<t>* A, const tensor<t>* B) : A(A), B(B) {}
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
-class subtractNode : public node {
-    tensor<t>* A;
-    tensor<t>* B;
+class subtractNode : public node<t> {
+    const tensor<t>* A;
+    const tensor<t>* B;
 public:
-    subtractNode(tensor<t>* A, tensor<t>* B) : A(A), B(B) {}
-
-    void backward() override {}
+    subtractNode(const tensor<t>* A, const tensor<t>* B) : A(A), B(B) {}
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
-class multiplyNode : public node {
-    tensor<t>* A;
-    tensor<t>* B;
+class multiplyNode : public node<t> {
+    const tensor<t>* A;
+    const tensor<t>* B;
 public:
-    multiplyNode(tensor<t>* A, tensor<t>* B) : A(A), B(B) {}
-
-    void backward() override {}
+    multiplyNode(const tensor<t>* A, const tensor<t>* B) : A(A), B(B) {}
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
-class divideNode : public node {
-    tensor<t>* A;
-    tensor<t>* B;
+class divideNode : public node<t> {
+    const tensor<t>* A;
+    const tensor<t>* B;
 public:
-    divideNode(tensor<t>* A, tensor<t>* B) : A(A), B(B) {}
-
-    void backward() override {}
+    divideNode(const tensor<t>* A, const tensor<t>* B) : A(A), B(B) {}
+        virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
-class matMulNode : public node {
-    tensor<t>* A;
-    tensor<t>* B;
+class matMulNode : public node<t> {
+    const tensor<t>* A;
+    const tensor<t>* B;
 public:
 
-    matMulNode(tensor<t>* A, tensor<t>* B) : A(A), B(B) {}
-
-    void backward() override {}
+    matMulNode(const tensor<t>* A, const tensor<t>* B) : A(A), B(B) {}
+        virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
-class transposeNode : public node {
-    tensor<t>* A;
+class transposeNode : public node<t> {
+    const tensor<t>* A;
 public:
 
-    transposeNode(tensor<t>* A) : A(A) {}
-
-    void backward() override {}
+    transposeNode(const tensor<t>* A) : A(A) {}
+        virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
-class sumNode : public node {
-    tensor<t>* A;
+class sumNode : public node<t> {
+    const tensor<t>* A;
 public:
 
-    sumNode(tensor<t>* A) : A(A) {}
-
-    void backward() override {}
+    sumNode(const tensor<t>* A) : A(A) {}
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
-class meanNode : public node {
-    tensor<t>* A;
+class meanNode : public node<t> {
+    const tensor<t>* A;
 public:
 
-    meanNode(tensor<t>* A) : A(A) {}
-
-    void backward() override {}
+    meanNode(const tensor<t>* A) : A(A) {}
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
-class reshapeNode : public node {
-    tensor<t>* A;
-    std::vector<size_t> oldShape; 
+class reshapeNode : public node<t> {
+    const tensor<t>* A;
+    const std::vector<size_t> oldShape; 
 public:
 
-    reshapeNode(tensor<t>* A, std::vector<size_t> oldShape) : A(A), oldShape(oldShape) {}
-
-    void backward() override {}
+    reshapeNode(const tensor<t>* A, const std::vector<size_t> oldShape) : A(A), oldShape(oldShape) {}
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
-class expNode : public node {
-    tensor<t>* A;
+class expNode : public node<t> {
+    const tensor<t>* A;
 public:
 
-    expNode(tensor<t>* A) : A(A) {}
-
-    void backward() override {}
+    expNode(const tensor<t>* A) : A(A) {}
+    
 };
 
 template<typename t>
-class logNode : public node {
-    tensor<t>* A;
+class logNode : public node<t> {
+    const tensor<t>* A;
 public:
 
-    logNode(tensor<t>* A) : A(A) {}
+    logNode(const tensor<t>* A) : A(A) {}
 
-    void backward() override {}
 };
 
 template<typename t>
-class powNode : public node {
-    tensor<t>* A;
-    t power;
+class powNode : public node<t> {
+    const tensor<t>* A;
+    const t power;
 public:
 
-    powNode(tensor<t>* A, t power) : A(A), power(power) {}
+    powNode(const tensor<t>* A, const t power) : A(A), power(power) {}
 
-    void backward() override {}
 };
 
 template<typename t>
-class reluNode : public node {
-    tensor<t>* A;
+class reluNode : public node<t> {
+    const tensor<t>* A;
 public:
 
-    reluNode(tensor<t>* A) : A(A) {}
+    reluNode(const tensor<t>* A) : A(A) {}
 
-    void backward() override {}
 };
 
 template<typename t>
-class sigmoidNode : public node {
-    tensor<t>* A;
+class sigmoidNode : public node<t> {
+    const tensor<t>* A;
 public:
 
-    sigmoidNode(tensor<t>* A) : A(A) {}
+    sigmoidNode(const tensor<t>* A) : A(A) {}
 
-    void backward() override {}
 };
 
 template<typename t>
-class tanhNode : public node {
-    tensor<t>* A;
+class tanhNode : public node<t> {
+    const tensor<t>* A;
 public:
 
-    tanhNode(tensor<t>* A) : A(A) {}
+    tanhNode(const tensor<t>* A) : A(A) {}
 
-    void backward() override {}
 };
 
 template<typename t>
-class geluNode : public node {
-    tensor<t>* A;
+class geluNode : public node<t> {
+    const tensor<t>* A;
 public:
 
-    geluNode(tensor<t>* A) : A(A) {}
+    geluNode(const tensor<t>* A) : A(A) {}
 
-    void backward() override {}
 };

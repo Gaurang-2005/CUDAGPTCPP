@@ -28,7 +28,7 @@ public:
             storageLength*=i;
         }
         if (dev == device::CPU)
-        tens = new t[storageLength];
+        tens = new t[storageLength]{};
 
         else if (dev == device::GPU) {
             constructorAllocate();
@@ -184,7 +184,6 @@ public:
 
     void identity();
     tensor sum();
-    tensor operator-();
     tensor mean() {
         tensor<t> out;
         if (isGradEnabled) {
@@ -218,4 +217,17 @@ public:
     }
 
     tensor operator-() const;
+
+    tensor operator*(t val) const;
+
+    tensor exp() const;
+    tensor pow(t power) const;
+    tensor log() const;
+
+    // //Activation Functions
+    tensor ReLU() const;
+    tensor sigmoid() const;
+    tensor tanh() const;
+    tensor gelu() const;
+
 };

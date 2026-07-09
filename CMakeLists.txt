@@ -12,7 +12,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 add_executable(CUDA-GPT
     src/main.cpp
     src/tensor/tensor.cu
-    src/autograd/node.cpp
+    src/autograd/node.cu
 )
 
 target_include_directories(CUDA-GPT PRIVATE

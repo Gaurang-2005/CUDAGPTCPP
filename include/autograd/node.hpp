@@ -46,7 +46,7 @@ class divideNode : public node<t> {
     const tensor<t>* B;
 public:
     divideNode(const tensor<t>* A, const tensor<t>* B) : A(A), B(B) {}
-        virtual void backward(const tensor<t>& owner) override;
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
@@ -56,7 +56,7 @@ class matMulNode : public node<t> {
 public:
 
     matMulNode(const tensor<t>* A, const tensor<t>* B) : A(A), B(B) {}
-        virtual void backward(const tensor<t>& owner) override;
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
@@ -65,7 +65,7 @@ class transposeNode : public node<t> {
 public:
 
     transposeNode(const tensor<t>* A) : A(A) {}
-        virtual void backward(const tensor<t>& owner) override;
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
@@ -102,7 +102,7 @@ class expNode : public node<t> {
 public:
 
     expNode(const tensor<t>* A) : A(A) {}
-    
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
@@ -111,7 +111,7 @@ class logNode : public node<t> {
 public:
 
     logNode(const tensor<t>* A) : A(A) {}
-
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
@@ -121,7 +121,7 @@ class powNode : public node<t> {
 public:
 
     powNode(const tensor<t>* A, const t power) : A(A), power(power) {}
-
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
@@ -130,7 +130,7 @@ class reluNode : public node<t> {
 public:
 
     reluNode(const tensor<t>* A) : A(A) {}
-
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
@@ -139,7 +139,7 @@ class sigmoidNode : public node<t> {
 public:
 
     sigmoidNode(const tensor<t>* A) : A(A) {}
-
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
@@ -148,7 +148,7 @@ class tanhNode : public node<t> {
 public:
 
     tanhNode(const tensor<t>* A) : A(A) {}
-
+    virtual void backward(const tensor<t>& owner) override;
 };
 
 template<typename t>
@@ -157,5 +157,5 @@ class geluNode : public node<t> {
 public:
 
     geluNode(const tensor<t>* A) : A(A) {}
-
+    virtual void backward(const tensor<t>& owner) override;
 };

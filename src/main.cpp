@@ -187,15 +187,603 @@ double sumCheck(double* data, size_t storageLength) {
     return sum;
 }
 
-int main() {
-    tensor<double> test(4096, 4096);
-    // for (int i = 1; i <= test.numelements(); i++) {
-    //     test.data()[i-1] = i;
-    // }
-    test.ones();
-    tensor<double> sumGPU = test.sum();
-    test.toCPU();
-    double sumCPU = sumCheck(test.data(), test.numElements());
+void separator(const std::string& title) {
+    std::cout << "\n========================================\n";
+    std::cout << title << '\n';
+    std::cout << "========================================\n";
+}
 
-    std::cout << "sumCPU: " << sumCPU << " and sumGPU: " << sumGPU.data()[0] << std::endl;
+
+using std::cout;
+using std::endl;
+
+int main() {
+
+    cout << "\n========================================\n";
+    cout << "TEST 1 : ADD -> EXP -> SUM\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        tensor<float> B(device::GPU,2,2);
+        cout<<"passed\n";
+
+        A.ones();
+        B.ones();
+        cout<<"passed\n";
+        A.requiresGrad(true);
+        B.requiresGrad(true);
+        cout<<"passed\n";
+        auto out = (A + B).exp().sum();
+        cout<<"passed\n";
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+
+        cout << "B.grad\n";
+        B.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 2 : LOG -> POW -> MEAN\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        A.fill(2);
+
+        A.requiresGrad(true);
+
+        auto out = A.log().pow(2).mean();
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 3 : GELU -> SIGMOID -> TANH -> SUM\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        A.fill(0.5f);
+
+        A.requiresGrad(true);
+
+        auto out = A.gelu().sigmoid().tanh().sum();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 4 : RELU NEGATIVE INPUT\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        A.fill(-2);
+
+        A.requiresGrad(true);
+
+        auto out = A.ReLU().sum();
+        out.backward();
+
+        cout << "Expected gradient = 0\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 5 : SIGMOID(0)\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        A.zeros();
+
+        A.requiresGrad(true);
+
+        auto out = A.sigmoid().sum();
+        out.backward();
+
+        cout << "Expected ~= 0.25\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 6 : TANH(0)\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        A.zeros();
+
+        A.requiresGrad(true);
+
+        auto out = A.tanh().sum();
+        out.backward();
+
+        cout << "Expected = 1\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 7 : EXP(LOG(A))\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        A.fill(3);
+
+        A.requiresGrad(true);
+
+        auto out = A.log().exp().sum();
+
+        out.backward();
+
+        cout << "Expected = 1\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 8 : POW(3)\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        A.fill(2);
+
+        A.requiresGrad(true);
+
+        auto out = A.pow(3).sum();
+
+        out.backward();
+
+        cout << "Expected = 12\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 9 : RESHAPE -> TANH -> MEAN\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        A.fill(1);
+
+        A.requiresGrad(true);
+
+        auto out = A.reshaped(1,4).tanh().mean();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 10 : TRANSPOSE -> MATMUL -> SUM\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        tensor<float> B(device::GPU,2,2);
+
+        A.ones();
+        B.ones();
+
+        A.requiresGrad(true);
+        B.requiresGrad(true);
+
+        auto out = A.transposed().matMul(B).sum();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+
+        cout << "B.grad\n";
+        B.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 11 : DIAMOND GRAPH\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.fill(2);
+        A.requiresGrad(true);
+
+        auto B = A.exp();
+        auto C = A.log();
+
+        auto out = (B + C).sum();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 12 : TRIPLE BRANCH\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.fill(2);
+
+        A.requiresGrad(true);
+
+        auto out =
+            (
+                A.exp()
+                +
+                A.pow(2)
+                +
+                A.log()
+            ).mean();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 13 : VERY DEEP CHAIN\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.fill(1.5f);
+        A.requiresGrad(true);
+
+        auto out =
+            A.exp()
+            .log()
+            .pow(2)
+            .gelu()
+            .sigmoid()
+            .tanh()
+            .pow(2)
+            .exp()
+            .log()
+            .mean();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 14 : HUGE BRANCH GRAPH\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.fill(1);
+
+        A.requiresGrad(true);
+
+        auto out =
+            (
+                A.exp()
+                +
+                A.sigmoid()
+                +
+                A.tanh()
+                +
+                A.gelu()
+                +
+                A.pow(2)
+                +
+                A.log()
+            ).sum();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 15 : MATMUL CHAIN\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+        tensor<float> B(device::GPU,2,2);
+        tensor<float> C(device::GPU,2,2);
+
+        A.ones();
+        B.ones();
+        C.ones();
+
+        A.requiresGrad(true);
+        B.requiresGrad(true);
+        C.requiresGrad(true);
+
+        auto out =
+            A.matMul(B)
+             .matMul(C)
+             .gelu()
+             .mean();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+
+        cout << "B.grad\n";
+        B.gradient()->print();
+
+        cout << "C.grad\n";
+        C.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 16 : MULTIPLE RESHAPES\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.fill(2);
+
+        A.requiresGrad(true);
+
+        auto out =
+            A.reshaped(1,4)
+             .reshaped(2,2)
+             .reshaped(4,1)
+             .mean();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 17 : DOUBLE TRANSPOSE\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.fill(3);
+
+        A.requiresGrad(true);
+
+        auto out =
+            A.transposed()
+             .transposed()
+             .sum();
+
+        out.backward();
+
+        cout << "Expected = 1\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 18 : LONG EXP LOG CHAIN\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.fill(2);
+
+        A.requiresGrad(true);
+
+        auto out =
+            A.exp()
+             .log()
+             .exp()
+             .log()
+             .exp()
+             .log()
+             .exp()
+             .log()
+             .sum();
+
+        out.backward();
+
+        cout << "Expected = 1\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 19 : ACTIVATION CASCADE\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.random();
+
+        A.requiresGrad(true);
+
+        auto out =
+            A.ReLU()
+             .sigmoid()
+             .tanh()
+             .gelu()
+             .sigmoid()
+             .mean();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 20 : MASSIVE ACCUMULATION\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.ones();
+
+        A.requiresGrad(true);
+
+        auto out =
+            A+A+A+A+A+A+A+A+A+A;
+
+        out = out.sum();
+
+        out.backward();
+
+        cout << "Expected = 10\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 21 : DEEP BINARY TREE\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.fill(2);
+
+        A.requiresGrad(true);
+
+        auto B=A+A;
+        auto C=B+B;
+        auto D=C+C;
+        auto E=D+D;
+        auto F=E+E;
+
+        auto out=F.sum();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 22 : RANDOM VALUES\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,2,2);
+
+        A.random();
+
+        A.requiresGrad(true);
+
+        auto out =
+            (
+                A.exp()
+                *
+                A.sigmoid()
+                /
+                A.gelu()
+            ).mean();
+
+        out.backward();
+
+        cout << "A.grad\n";
+        A.gradient()->print();
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 23 : LARGE TENSOR\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,512,512);
+
+        A.ones();
+
+        A.requiresGrad(true);
+
+        auto out =
+            A.exp()
+             .log()
+             .pow(2)
+             .mean();
+
+        out.backward();
+
+        cout << "Large tensor completed.\n";
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 24 : REPEATED GRAPH CREATION\n";
+    cout << "========================================\n";
+
+    {
+        for(int i=0;i<1000;i++)
+        {
+            tensor<float> A(device::GPU,2,2);
+
+            A.fill(2);
+
+            A.requiresGrad(true);
+
+            auto out =
+                A.exp()
+                 .gelu()
+                 .pow(2)
+                 .sigmoid()
+                 .mean();
+
+            out.backward();
+        }
+
+        cout << "Completed 1000 graphs.\n";
+    }
+
+    cout << "\n========================================\n";
+    cout << "TEST 25 : GPU MEMORY STRESS\n";
+    cout << "========================================\n";
+
+    {
+        for(int i=0;i<200;i++)
+        {
+            tensor<float> A(device::GPU,1024,1024);
+
+            A.random();
+
+            A.requiresGrad(true);
+
+            auto out =
+                (
+                    A.exp()
+                     .gelu()
+                     .pow(2)
+                     .sigmoid()
+                     .tanh()
+                ).mean();
+
+            out.backward();
+
+            if(i%20==0)
+                cout << "Iteration " << i << endl;
+        }
+
+        cout << "Memory stress completed.\n";
+    }
+
+    cout << "\n========================================\n";
+    cout << "ALL STRESS TESTS FINISHED\n";
+    cout << "========================================\n";
+    return 0;
 }

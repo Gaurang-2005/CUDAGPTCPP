@@ -60,6 +60,7 @@ tensor<t>::~tensor() {
     else if (dev == device::CPU) {
         delete[] tens;
     }
+    if (grad) delete grad;
 }
 
 template <typename t>
@@ -78,7 +79,7 @@ tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other
         cudaMemcpy(tens, other.tens, storageLength * sizeof(t), cudaMemcpyDefault);
     }
     isGradEnabled = other.isGradEnabled;
-    grad = other.grad;
+    grad = new tensor(other.grad);
     gradFunction = other.gradFunction;
 }
 
@@ -107,8 +108,8 @@ tensor<t>& tensor<t>::operator=(const tensor& other) {
         storageLength = other.storageLength;
         dev = other.dev;
         isGradEnabled = other.isGradEnabled;
-        delete grad;
-        grad = other.grad;
+        if (grad) delete grad;
+        grad = new tensor(other.grad);
         gradFunction = other.gradFunction;
         if (dev == device::CPU) {
             tens = new t[storageLength];
@@ -397,7 +398,7 @@ void tensor<t>::print() const {
     for (size_t i = 0; i < storageLength; ++i) {
         std::cout << tempData[i] << " ";
     }
-    std::cout << std::endl;
+    std::cout << std::endl << std::endl;
     if (dev == device::GPU) {
         delete[] tempData;
     }
@@ -577,6 +578,12 @@ void tensor<t>::identity() {
     isIdentity = true;
     identityKernel <<<gridSize, blockSize>>> (tens, shape[0], shape[1]);
     cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
 }
 
 template <typename t>
@@ -588,14 +595,258 @@ __global__ void negateKernel(t* tens, size_t storageLength) {
     tens[idx] *= -1;
 }
 template <typename t>
-tensor<t> tensor<t>::operator-() {
+tensor<t> tensor<t>::operator-() const {
     tensor<t> temp(*this);
 
     temp.toGPU();
 
     negateKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(temp.tens, storageLength);
     cudaDeviceSynchronize();
-
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
     return temp;
 }
 
+template <typename t>
+__global__ void expKernel(t* out, t* in, size_t storageLength) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = exp(in[idx]);
+}
+
+template <typename t>
+tensor<t> tensor<t>::exp() const {
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+    expKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<expNode<t>>(this);
+    }
+    
+    return out;
+}
+
+template <typename t>
+__global__ void powKernel(t* out, t* in, size_t storageLength, t power) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = pow(in[idx], power);
+}
+
+template <typename t>
+tensor<t> tensor<t>::pow(t power) const {
+    toGPU();
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+    powKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, power);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<powNode<t>>(this, power);
+    }
+    
+    return out;
+}
+
+template <typename t>
+__global__ void logKernel(t* out, t* in, size_t storageLength) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = log(in[idx]);
+}
+
+template <typename t>
+tensor<t> tensor<t>::log() const {
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+    logKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<logNode<t>>(this);
+    }
+    
+    return out;
+}
+
+template <typename t>
+__global__ void digitMultiplyKernel(t* out, t* in, size_t storageLength, t val) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = in[idx] * val;
+}
+
+template <typename t>
+tensor<t> tensor<t>::operator*(t val) const {
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+    digitMultiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    return out;
+}
+
+template <typename t>
+__global__ void ReLUKernel(t*tens, t* out, size_t storageLength) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    if (tens[idx] >= 0) out[idx] = tens[idx];
+    else out[idx] = 0;
+}
+
+template <typename t>
+tensor<t> tensor<t>::ReLU() const {
+    toGPU();
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+
+    ReLUKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<reluNode<t>>(this);
+    }
+
+    return out;
+}
+
+template <typename t>
+__global__ void sigmoidKernel(t*tens, t* out, size_t storageLength) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = 1 / (1 + exp(-tens[idx]));
+}
+
+template <typename t>
+tensor<t> tensor<t>::sigmoid() const {
+    toGPU();
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+
+    sigmoidKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<sigmoidNode<t>>(this);
+    }
+
+    return out;
+}
+
+template <typename t>
+__global__ void tanhKernel(t*tens, t* out, size_t storageLength) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = (exp(tens[idx]) - exp(-tens[idx])) / (exp(tens[idx]) + exp(-tens[idx]));
+}
+
+template <typename t>
+tensor<t> tensor<t>::tanh() const {
+    toGPU();
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+
+    tanhKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<tanhNode<t>>(this);
+    }
+
+    return out;
+}
+
+template <typename t>
+__global__ void geluKernel(t* tens, t* out, size_t storageLength) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+    constexpr t root2OnRootPi = t(0.79788456080286535587989211986876L);
+    constexpr t geluConst = t(0.044715);
+    t temp = geluConst * tens[idx] * tens[idx] * tens[idx] + tens[idx];
+    temp *= root2OnRootPi;
+    out[idx] = 0.5 * tens[idx] * (1 + (tanh(temp)));
+}
+
+template <typename t>
+tensor<t> tensor<t>::gelu() const {
+    toGPU();
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+
+    geluKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<geluNode<t>>(this);
+    }
+
+    return out;
+}

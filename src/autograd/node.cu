@@ -64,8 +64,8 @@ void addNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(true);
     B->requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
-    if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
 }
 
 template <typename t>
@@ -79,8 +79,8 @@ void subtractNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(true);
     B->requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
-    if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
 }
 
 template <typename t>
@@ -88,15 +88,15 @@ void multiplyNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B);
-    else A -> setGradient(new tensor(*owner.gradient() * (*B)));
-    if (B -> gradient()) *B -> gradient() += *owner.gradient() * (*A);
-    else B -> setGradient(new tensor(*owner.gradient() * (*A)));
+    if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
+    else A -> setGradient(new tensor(*owner.gradient() * (*B.get())));
+    if (B -> gradient()) *B -> gradient() += *owner.gradient() * (*A.get());
+    else B -> setGradient(new tensor(*owner.gradient() * (*A.get())));
     A->requiresGrad(true);
     B->requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
-    if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
 }
 
 template <typename t>
@@ -104,15 +104,15 @@ void divideNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B);
-    else A -> setGradient(new tensor(*owner.gradient() / (*B)));
-    if (B -> gradient()) *B -> gradient() -= (*owner.gradient() * (*A))/((*B)*(*B));
-    else B -> setGradient(new tensor(-(*owner.gradient() * (*A))/((*B)*(*B))));
+    if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B.get());
+    else A -> setGradient(new tensor(*owner.gradient() / (*B.get())));
+    if (B -> gradient()) *B -> gradient() -= (*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()));
+    else B -> setGradient(new tensor(-(*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))));
     A->requiresGrad(true);
     B->requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
-    if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
 }
 
 template <typename t>
@@ -120,15 +120,15 @@ void matMulNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += (*owner.gradient()).matMul((*B).transposed());
-    else A -> setGradient(new tensor((*owner.gradient()).matMul((*B).transposed())));
-    if (B -> gradient()) *B -> gradient() += ((*A).transposed()).matMul(*owner.gradient());
-    else B -> setGradient(new tensor(((*A).transposed()).matMul(*owner.gradient())));
+    if (A -> gradient()) *A -> gradient() += (*owner.gradient()).matMul(B -> transposed());
+    else A -> setGradient(new tensor((*owner.gradient()).matMul(B -> transposed())));
+    if (B -> gradient()) *B -> gradient() += (A -> transposed()).matMul(*owner.gradient());
+    else B -> setGradient(new tensor((A -> transposed()).matMul(*owner.gradient())));
     A->requiresGrad(true);
     B->requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
-    if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
 }
 
 template <typename t>
@@ -139,7 +139,7 @@ void transposeNode<t>::backward(const tensor<t>& owner) {
     else A -> setGradient(new tensor((*owner.gradient()).transposed()));
     A->requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
 
 template <typename t>
@@ -153,7 +153,7 @@ void sumNode<t>::backward(const tensor<t>& owner) {
     else A -> setGradient(new tensor(temp));
     A->requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
 
 template <typename t>
@@ -167,7 +167,7 @@ void meanNode<t>::backward(const tensor<t>& owner) {
     else A -> setGradient(new tensor(temp));
     A->requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
     
 template <typename t>
@@ -178,7 +178,7 @@ void reshapeNode<t>::backward(const tensor<t>& owner) {
     else A -> setGradient(new tensor(owner.gradient()->reshaped(oldShape[0], oldShape[1])));
     A->requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
 
 template <typename t>
@@ -189,20 +189,20 @@ void expNode<t>::backward(const tensor<t>& owner) {
     else A -> setGradient(new tensor(*(owner.gradient()) * A -> exp()));
     A -> requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
 
 template <typename t>
 void logNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    tensor<t> temp(*A);
+    tensor<t> temp(*A.get());
     temp.ones();
-    if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * temp / *A;
-    else A -> setGradient(new tensor(*(owner.gradient()) * temp / *A));
+    if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * temp / *A.get();
+    else A -> setGradient(new tensor(*(owner.gradient()) * temp / *A.get()));
     A -> requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
 
 template <typename t>
@@ -213,7 +213,7 @@ void powNode<t>::backward(const tensor<t>& owner) {
     else A -> setGradient(new tensor(*(owner.gradient()) * A -> pow(power - 1) * power));
     A -> requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
 
 template <typename t>
@@ -244,7 +244,7 @@ void reluNode<t>::backward(const tensor<t>& owner) {
     else A -> setGradient(new tensor(*owner.gradient() * temp));
     A -> requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
 
 template <typename t>
@@ -258,7 +258,7 @@ void sigmoidNode<t>::backward(const tensor<t>& owner) {
     else A -> setGradient(new tensor(*owner.gradient() * temp));
     A -> requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
 
 template <typename t>
@@ -273,7 +273,7 @@ void tanhNode<t>::backward(const tensor<t>& owner) {
     else A -> setGradient(new tensor(*owner.gradient() * temp));
     A -> requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
 
 template <typename t>
@@ -310,5 +310,5 @@ void geluNode<t>::backward(const tensor<t>& owner) {
     else A -> setGradient(new tensor(*owner.gradient() * temp));
     A -> requiresGrad(true);
 
-    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A);
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }

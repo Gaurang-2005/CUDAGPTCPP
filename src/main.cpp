@@ -217,7 +217,7 @@ int main() {
         auto out = (A + B).exp().sum();
         cout<<"passed\n";
         out.backward();
-
+        cout<<"passed\n";
         cout << "A.grad\n";
         A.gradient()->print();
 
@@ -635,18 +635,19 @@ int main() {
     cout << "========================================\n";
 
     {
+        cout <<"passed\n";
         tensor<float> A(device::GPU,2,2);
-
+        cout <<"passed\n";
         A.ones();
 
         A.requiresGrad(true);
-
+        cout <<"passed\n";
         auto out =
             A+A+A+A+A+A+A+A+A+A;
-
-        out = out.sum();
-
-        out.backward();
+        cout << "passed\n";
+        tensor<float> fresh = out.sum();
+        cout << "passed\n";
+        fresh.backward();
 
         cout << "Expected = 10\n";
         A.gradient()->print();

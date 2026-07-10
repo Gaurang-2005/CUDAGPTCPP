@@ -1,4 +1,3 @@
-#include <memory>
 #include <vector>
 #include <concepts>
 #include <cassert>
@@ -131,12 +130,24 @@ public:
 
     tensor& operator+=(const tensor& other);
     tensor& operator-=(const tensor& other);
-    tensor operator+(const tensor& other) const;
-    tensor operator-(const tensor& other) const;
+    tensor operator+(const tensor& other) const &;
+    tensor operator-(const tensor& other) const &;
+    tensor operator+(const tensor& other) &&;
+    tensor operator-(const tensor& other) &&;
+    tensor operator+(tensor&& other) const &;
+    tensor operator-(tensor&& other) const &;
+    tensor operator+(tensor&& other) &&;
+    tensor operator-(tensor&& other) &&;
     tensor& operator*=(const tensor& other);
     tensor& operator/=(const tensor& other);
-    tensor operator*(const tensor& other) const;
-    tensor operator/(const tensor& other) const;
+    tensor operator*(const tensor& other) const &;
+    tensor operator/(const tensor& other) const &;
+    tensor operator*(const tensor& other) &&;
+    tensor operator/(const tensor& other) &&;
+    tensor operator*(tensor&& other) const &;
+    tensor operator/(tensor&& other) const &;
+    tensor operator*(tensor&& other) &&;
+    tensor operator/(tensor&& other) &&;
 
     template <typename ... Args>
     requires (std::integral<Args> && ...)
@@ -153,7 +164,7 @@ public:
 
     template <typename ... Args>
     requires (std::integral<Args> && ...)
-    tensor reshaped(Args...args) const {
+    tensor reshaped(Args...args) const & {
         tensor<t> temp(*this);
         temp.shape = std::vector<size_t>({static_cast<size_t>(args)...});
         size_t newStorageLength = 1;
@@ -168,11 +179,33 @@ public:
         return temp;
     }
 
+    template <typename ... Args>
+    requires (std::integral<Args> && ...)
+    tensor reshaped(Args...args) const && {
+        tensor<t> temp(*this);
+        temp.shape = std::vector<size_t>({static_cast<size_t>(args)...});
+        size_t newStorageLength = 1;
+        for (auto& i : temp.shape) {
+            newStorageLength *= i;
+        }
+        assert(newStorageLength == storageLength);
+        if (isGradEnabled) {
+            std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+            temp.gradFunction = std::make_shared<reshapeNode<t>>(first, shape);
+            temp.isGradEnabled = true;
+        }
+        return temp;
+    }
+
     void print() const;
-    tensor transposed() const;
+    tensor transposed() const &;
+    tensor transposed() &&;
     tensor& transpose();
 
-    tensor matMul(const tensor<t>& other) const;
+    tensor matMul(const tensor<t>& other) const &;
+    tensor matMul(const tensor<t>& other) &&;
+    tensor matMul(tensor<t>&& other) const &;
+    tensor matMul(tensor<t>&& other) &&;
 
     void requiresGrad(bool val) const {
         isGradEnabled = val;
@@ -183,8 +216,9 @@ public:
     }
 
     void identity();
-    tensor sum();
-    tensor mean() {
+    tensor sum() const &;
+    tensor sum() &&;
+    tensor mean() const & {
         tensor<t> out;
         if (isGradEnabled) {
             isGradEnabled = false;
@@ -199,6 +233,25 @@ public:
         if (isGradEnabled) {
             out.isGradEnabled = true;
             out.gradFunction = std::make_shared<meanNode<t>>(this);
+        }
+        return out;
+    }
+    tensor mean() && {
+        tensor<t> out;
+        if (isGradEnabled) {
+            isGradEnabled = false;
+            out = sum();
+            out.tens[0] /= storageLength;
+            isGradEnabled = true;
+        }
+        else {
+            tensor<t> out = sum();
+            out.tens[0] /= storageLength;
+        }
+        if (isGradEnabled) {
+            std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+            out.isGradEnabled = true;
+            out.gradFunction = std::make_shared<meanNode<t>>(first);
         }
         return out;
     }
@@ -220,14 +273,20 @@ public:
 
     tensor operator*(t val) const;
 
-    tensor exp() const;
-    tensor pow(t power) const;
-    tensor log() const;
-
+    tensor exp() const &;
+    tensor exp() &&;
+    tensor pow(t power) const &;
+    tensor pow(t power) &&;
+    tensor log() const &;
+    tensor log() &&;
+    
     // //Activation Functions
-    tensor ReLU() const;
-    tensor sigmoid() const;
-    tensor tanh() const;
-    tensor gelu() const;
-
+    tensor ReLU() const &;
+    tensor ReLU() &&;
+    tensor sigmoid() const &;
+    tensor sigmoid() &&;
+    tensor tanh() const &;
+    tensor tanh() &&;
+    tensor gelu() const &;
+    tensor gelu() &&;
 };

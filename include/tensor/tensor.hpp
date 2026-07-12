@@ -1,3 +1,5 @@
+#pragma once
+
 #include <vector>
 #include <concepts>
 #include <cassert>
@@ -223,11 +225,13 @@ public:
         if (isGradEnabled) {
             isGradEnabled = false;
             out = sum();
+            out.toCPU();
             out.tens[0] /= storageLength;
             isGradEnabled = true;
         }
         else {
-            tensor<t> out = sum();
+            out = sum();
+            out.toCPU();
             out.tens[0] /= storageLength;
         }
         if (isGradEnabled) {
@@ -241,11 +245,13 @@ public:
         if (isGradEnabled) {
             isGradEnabled = false;
             out = sum();
+            out.toCPU();
             out.tens[0] /= storageLength;
             isGradEnabled = true;
         }
         else {
-            tensor<t> out = sum();
+            out = sum();
+            out.toCPU();
             out.tens[0] /= storageLength;
         }
         if (isGradEnabled) {
@@ -263,7 +269,7 @@ public:
             delete grad;
         }
 
-        grad = new tensor(device::GPU, shape[0], shape[1]);
+        grad = new tensor(device::GPU, gradFunction -> shape()[0], gradFunction -> shape()[1]);
         grad->ones();
 
         if (gradFunction) gradFunction -> backward(*this);
@@ -279,7 +285,10 @@ public:
     tensor pow(t power) &&;
     tensor log() const &;
     tensor log() &&;
-    
+
+    tensor rowSum() const;
+    tensor rowMax() const;
+
     // //Activation Functions
     tensor ReLU() const &;
     tensor ReLU() &&;
@@ -289,4 +298,6 @@ public:
     tensor tanh() &&;
     tensor gelu() const &;
     tensor gelu() &&;
+    tensor softmax() const &;
+    tensor softmax() &&;
 };

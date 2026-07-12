@@ -52,6 +52,11 @@ template class tanhNode<double>;
 template class geluNode<float>;
 template class geluNode<double>;
 
+template class softmaxNode<float>;
+template class softmaxNode<double>;
+
+template class crossEntropyLossNode<float>;
+template class crossEntropyLossNode<double>;
 
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
@@ -311,4 +316,69 @@ void geluNode<t>::backward(const tensor<t>& owner) {
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+}
+
+template <typename t>
+__global__ void broadcastSubtractKernel(t* A, t* B, t* out, size_t row, size_t col) {
+    size_t idxX = threadIdx.x + blockDim.x * blockIdx.x;
+    size_t idxY = threadIdx.y + blockDim.y * blockIdx.y;
+
+    if (idxX >= col ||  idxY >= row) return;
+
+    out[idxY*col + idxX] = A[idxY*col + idxX] - B[idxY];
+}
+
+template <typename t>
+void softmaxNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient() -> requiresGrad(false);
+    A->requiresGrad(false);
+    owner.requiresGrad(false);
+    tensor<t> temp(device::GPU, A->getShape()[0], A->getShape()[1]);
+    tensor<t> dotProd = (*owner.gradient() * owner).rowSum();
+    dim3 blocks = dim3(cuda::ceil_div(A->getShape()[1], 16), cuda::ceil_div(A->getShape()[0], 16));
+    dim3 threads = dim3(16, 16);
+    broadcastSubtractKernel<<<blocks, threads>>>(owner.gradient()->data(), dotProd.data(), temp.data(), A->getShape()[0], A->getShape()[1]);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    if (A -> gradient()) *A -> gradient() += owner * temp;
+    else A -> setGradient(new tensor(owner * temp));
+    A -> requiresGrad(true);
+    owner.requiresGrad(true);
+
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+}
+
+template <typename t>
+__global__ void crossEntropyGradKernel(const t* pred, const t* targ, t* out, size_t storageLength, size_t rows) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = - (targ[idx] / (rows * pred[idx]));
+}
+
+template <typename t>
+void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient() -> requiresGrad(false);
+    A->requiresGrad(false);
+    tensor<t> temp(device::GPU, A->getShape()[0], A->getShape()[1]);
+    crossEntropyGradKernel<<<cuda::ceil_div(temp.numElements(), 256), 256>>>(A->data(), B->data(), temp.data(), temp.numElements(), temp.getShape()[0]);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    
+    if (A-> gradient()) *A-> gradient() += *owner.gradient() * temp;
+    else A-> setGradient(new tensor(*owner.gradient() * temp));
+    A-> requiresGrad(true);
+
+    if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
 }

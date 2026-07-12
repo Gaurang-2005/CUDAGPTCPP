@@ -964,20 +964,19 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) && {
 template<typename t>
 __global__ void sumKernel(t* out, t* tens, size_t storageLength) {
     size_t idx = threadIdx.x + blockIdx.x * blockDim.x;
-
-    if (idx < storageLength) {
-
-        __shared__ t tempStore[256];
-
-        tempStore[threadIdx.x] = tens[idx];
+    __shared__ t tempStore[256];
+    
+    if (idx < storageLength) tempStore[threadIdx.x] = tens[idx];
+    else tempStore[threadIdx.x] = 0;
+    
+    __syncthreads();
+    for (int i = 1; i < 256; i*=2) {
+        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256)) 
+        tempStore[threadIdx.x] += tempStore[threadIdx.x + i];
         __syncthreads();
-        for (int i = 1; i < 256; i*=2) {
-            if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256)) 
-            tempStore[threadIdx.x] += tempStore[threadIdx.x + i];
-            __syncthreads();
-        }
-        if (threadIdx.x == 0) out[blockIdx.x] = tempStore[0];
     }
+    if (threadIdx.x == 0) out[blockIdx.x] = tempStore[0];
+    
 }
 
 template<typename t>
@@ -1482,5 +1481,179 @@ tensor<t> tensor<t>::gelu() && {
         out.gradFunction = std::make_shared<geluNode<t>>(first);
     }
 
+    return out;
+}
+
+template <typename t>
+__global__ void rowSumKernel(t* tens, t* out, size_t rows, size_t cols) {
+    size_t row = blockIdx.x;
+    size_t pos = row * cols;
+    __shared__ t temp[256];
+    temp[threadIdx.x] = 0;
+    __syncthreads();
+
+    for (int i = 0; i < cols; i++) {
+        if (threadIdx.x + blockDim.x * i >= cols) break;
+        temp[threadIdx.x] += tens[pos + threadIdx.x + blockDim.x * i];
+    }
+    __syncthreads();
+    for (int i = 1; i < 256; i*=2) {
+        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256)) 
+        temp[threadIdx.x] += temp[threadIdx.x + i];
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) out[row] = temp[0];
+}
+
+template <typename t>
+tensor<t> tensor<t>::rowSum() const {
+    toGPU();
+
+    tensor<t> out(device::GPU, shape[0], 1);
+    rowSumKernel<<<shape[0], 256>>>(tens, out.tens, shape[0], shape[1]);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    return out;
+}
+
+
+template <typename t>
+__global__ void softmaxKernel(t* tens, t* sum, t* out, size_t row, size_t col) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= row * col) return;
+    out[idx] = tens[idx] / sum[idx / col];
+}
+
+template <typename t>
+__global__ void rowMaxKernel(t* tens, t* out, size_t rows, size_t cols) {
+    size_t row = blockIdx.x;
+    size_t pos = row * cols;
+    __shared__ t temp[256];
+    temp[threadIdx.x] = 0;
+    __syncthreads();
+
+    for (int i = 0; i < cols; i++) {
+        if (threadIdx.x + blockDim.x * i >= cols) break;
+        if (temp[threadIdx.x] < tens[pos + threadIdx.x + blockDim.x * i]) temp[threadIdx.x] = tens[pos + threadIdx.x + blockDim.x * i];
+    }
+    __syncthreads();
+    for (int i = 1; i < 256; i*=2) {
+        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256)) 
+        if (temp[threadIdx.x] < temp[threadIdx.x + i]) temp[threadIdx.x] = temp[threadIdx.x + i];
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) out[row] = temp[0];
+}
+
+template <typename t>
+tensor<t> tensor<t>::rowMax() const {
+    toGPU();
+
+    tensor<t> out(device::GPU, shape[0], 1);
+    rowMaxKernel<<<shape[0], 256>>>(tens, out.tens, shape[0], shape[1]);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    return out;
+}
+
+template <typename t>
+__global__ void broadcastSubtractKernel(t* A, t* B, t* out, size_t row, size_t col) {
+    size_t idxX = threadIdx.x + blockDim.x * blockIdx.x;
+    size_t idxY = threadIdx.y + blockDim.y * blockIdx.y;
+
+    if (idxX >= col ||  idxY >= row) return;
+
+    out[idxY*col + idxX] = A[idxY*col + idxX] - B[idxY];
+}
+
+template <typename t>
+tensor<t> tensor<t>::softmax() const & {
+    toGPU();
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+    
+    if (isGradEnabled) {
+        requiresGrad(false);
+        tensor<t> temp (device::GPU, shape[0], shape[1]);
+        dim3 blocks = dim3(cuda::ceil_div(shape[1], 16), cuda::ceil_div(shape[0], 16));
+        dim3 threads = dim3(16, 16);
+        broadcastSubtractKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[0], temp.shape[1]);
+        tensor<t> numerator = temp.exp();
+        tensor<t> summed = numerator.rowSum();
+        softmaxKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(numerator.tens, summed.tens, out.tens, shape[0], shape[1]);
+        requiresGrad(true);
+    }
+    else {
+        tensor<t> temp (device::GPU, shape[0], shape[1]);
+        dim3 blocks = dim3(cuda::ceil_div(shape[1], 16), cuda::ceil_div(shape[0], 16));
+        dim3 threads = dim3(16, 16);
+        broadcastSubtractKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[0], temp.shape[1]);
+        tensor<t> numerator = temp.exp();
+        tensor<t> summed = numerator.rowSum();
+        softmaxKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(numerator.tens, summed.tens, out.tens, shape[0], shape[1]);
+    }
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<softmaxNode<t>>(this);
+    }
+    return out;
+}
+
+template <typename t>
+tensor<t> tensor<t>::softmax() && {
+    toGPU();
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+    
+    if (isGradEnabled) {
+        requiresGrad(false);
+        tensor<t> temp (device::GPU, shape[0], shape[1]);
+        dim3 blocks = dim3(cuda::ceil_div(shape[1], 16), cuda::ceil_div(shape[0], 16));
+        dim3 threads = dim3(16, 16);
+        broadcastSubtractKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[0], temp.shape[1]);
+        tensor<t> numerator = temp.exp();
+        tensor<t> summed = numerator.rowSum();
+        softmaxKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(numerator.tens, summed.tens, out.tens, shape[0], shape[1]);
+        requiresGrad(true);
+    }
+    else {
+        tensor<t> temp (device::GPU, shape[0], shape[1]);
+        dim3 blocks = dim3(cuda::ceil_div(shape[1], 16), cuda::ceil_div(shape[0], 16));
+        dim3 threads = dim3(16, 16);
+        broadcastSubtractKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[0], temp.shape[1]);
+        tensor<t> numerator = temp.exp();
+        tensor<t> summed = numerator.rowSum();
+        softmaxKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(numerator.tens, summed.tens, out.tens, shape[0], shape[1]);
+    }
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    if (isGradEnabled) {
+        std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<softmaxNode<t>>(first);
+    }
     return out;
 }

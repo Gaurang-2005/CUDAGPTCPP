@@ -4,6 +4,7 @@
 #include <iomanip>
 
 #include "tensor/tensor.hpp"
+#include "loss/loss.hpp"
 
 template<typename T>
 bool verifyMatMul(const tensor<T>& A,
@@ -720,7 +721,6 @@ int main() {
              .log()
              .pow(2)
              .mean();
-
         out.backward();
 
         cout << "Large tensor completed.\n";
@@ -745,7 +745,6 @@ int main() {
                  .pow(2)
                  .sigmoid()
                  .mean();
-
             out.backward();
         }
 
@@ -756,35 +755,164 @@ int main() {
     cout << "TEST 25 : GPU MEMORY STRESS\n";
     cout << "========================================\n";
 
+    // {
+    //     for(int i=0;i<200;i++)
+    //     {
+    //         tensor<float> A(device::GPU,1024,1024);
+
+    //         A.random();
+
+    //         A.requiresGrad(true);
+
+    //         auto out =
+    //             (
+    //                 A.exp()
+    //                  .gelu()
+    //                  .pow(2)
+    //                  .sigmoid()
+    //                  .tanh()
+    //             ).mean();
+
+    //         out.backward();
+
+    //         if(i%20==0)
+    //             cout << "Iteration " << i << endl;
+    //     }
+
+    //     cout << "Memory stress completed.\n";
+    // }
+    cout << "\n========================================\n";
+    cout << "TEST : SOFTMAX FORWARD\n";
+    cout << "========================================\n";
     {
-        for(int i=0;i<200;i++)
-        {
-            tensor<float> A(device::GPU,1024,1024);
+        tensor<float> A(device::GPU, 1, 3);
 
-            A.random();
+        A.toCPU();
+        A(0,0) = 1;
+        A(0,1) = 2;
+        A(0,2) = 3;
+        A.toGPU();
 
-            A.requiresGrad(true);
+        auto out = A.softmax();
 
-            auto out =
-                (
-                    A.exp()
-                     .gelu()
-                     .pow(2)
-                     .sigmoid()
-                     .tanh()
-                ).mean();
+        cout << "Expected approximately:\n";
+        cout << "0.0900306 0.244728 0.665241\n";
 
-            out.backward();
+        out.print();
+        cout << "\n========================================\n";
+        cout << "ALL STRESS TESTS FINISHED\n";
+        cout << "========================================\n";
+    }
+    cout << "\n========================================\n";
+    cout << "TEST : SOFTMAX BACKWARD\n";
+    cout << "========================================\n";
+    {
+        tensor<float> A(device::GPU,1,3);
 
-            if(i%20==0)
-                cout << "Iteration " << i << endl;
-        }
+        A.toCPU();
 
-        cout << "Memory stress completed.\n";
+        A(0,0)=1;
+        A(0,1)=2;
+        A(0,2)=3;
+
+        A.toGPU();
+
+        A.requiresGrad(true);
+
+        auto out = A.softmax();
+
+        auto out2 = out.sum();
+
+        out2.backward();
+
+        cout << "Expected:\n";
+        cout << "0 0 0\n";
+
+        A.gradient()->print();
+    }
+    cout << "\n========================================\n";
+    cout << "TEST : RANDOM SOFTMAX\n";
+    cout << "========================================\n";
+
+    {
+        tensor<float> A(device::GPU,64,128);
+
+        A.random();
+
+        auto out = A.softmax();
+
+        auto sums = out.rowSum();
+
+        cout << "Every value should be close to 1\n";
+
+        sums.print();
+
+    }
+    {
+        tensor<float> A(device::GPU,1,3);
+
+        A.toCPU();
+        A(0,0)=100;
+        A(0,1)=101;
+        A(0,2)=102;
+        A.toGPU();
+
+        A.softmax().print();
+
+    }
+    {
+        tensor<float> A(device::GPU, 1, 3);
+
+        A.toCPU();
+        A(0,0) = 1;
+        A(0,1) = 2;
+        A(0,2) = 3;
+        A.toGPU();
+
+        A.requiresGrad(true);
+
+        auto out = A.softmax();
+        auto out2 = out.pow(2).sum();
+
+        out2.backward();
+
+        A.gradient()->print();
+    }
+    std::cout << "\n========================================\n";
+    std::cout << "TEST : CROSS ENTROPY\n";
+    std::cout << "========================================\n";
+
+    {
+        tensor<float> pred(device::CPU, 1, 3);
+
+        pred.data()[0] = 0.1f;
+        pred.data()[1] = 0.8f;
+        pred.data()[2] = 0.1f;
+
+        pred.toGPU();
+
+        pred.requiresGrad(true);
+
+        tensor<float> target(device::CPU, 1, 3);
+
+        target.data()[0] = 0.f;
+        target.data()[1] = 1.f;
+        target.data()[2] = 0.f;
+
+        target.toGPU();
+
+        auto loss = crossEntropyLoss(pred, target);
+
+        std::cout << "Expected Loss ~= 0.22314355\n";
+        loss.print();
+        
+        loss.backward();
+
+        std::cout << "Expected Gradient:\n";
+        std::cout << "0 -1.25 0\n";
+
+        pred.gradient()->print();
     }
 
-    cout << "\n========================================\n";
-    cout << "ALL STRESS TESTS FINISHED\n";
-    cout << "========================================\n";
     return 0;
 }

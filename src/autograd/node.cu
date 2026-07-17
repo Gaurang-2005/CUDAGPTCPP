@@ -58,6 +58,9 @@ template class softmaxNode<double>;
 template class crossEntropyLossNode<float>;
 template class crossEntropyLossNode<double>;
 
+template class batchNode<float>;
+template class batchNode<double>;
+
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
@@ -125,6 +128,8 @@ void matMulNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
+    // if (A -> gradient()) (A -> gradient())->print();
+    // if (B -> gradient()) (B -> gradient())->print();
     if (A -> gradient()) *A -> gradient() += (*owner.gradient()).matMul(B -> transposed());
     else A -> setGradient(new tensor((*owner.gradient()).matMul(B -> transposed())));
     if (B -> gradient()) *B -> gradient() += (A -> transposed()).matMul(*owner.gradient());
@@ -254,15 +259,15 @@ void reluNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void sigmoidNode<t>::backward(const tensor<t>& owner) {
+    owner.requiresGrad(false);
     A->requiresGrad(false);
-    tensor<t> temp = A->sigmoid();
-    tensor<t> one(device::GPU, A->getShape()[0], A->getShape()[1]);
+    tensor<t> one(device::GPU, owner.getShape()[0], owner.getShape()[1]);
     one.ones();
-    temp = temp * (one - temp);
+    tensor<t> temp = owner * (one - owner);
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * temp;
     else A -> setGradient(new tensor(*owner.gradient() * temp));
     A -> requiresGrad(true);
-
+    owner.requiresGrad(true);
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }
 
@@ -381,4 +386,14 @@ void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
     A-> requiresGrad(true);
 
     if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
+}
+
+template <typename t>
+void batchNode<t>::backward(const tensor<t>& owner) {
+    A->requiresGrad(false);
+    if (A -> gradient()) *A -> gradient() += owner.gradient()->colSum();
+    else A -> setGradient(new tensor(owner.gradient()->colSum()));
+    A -> requiresGrad(true);
+
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
 }

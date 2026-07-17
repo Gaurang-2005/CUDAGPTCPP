@@ -145,7 +145,7 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
         else if (dev == device::CPU) {
             delete[] tens;
         }
-        delete grad;
+        if (grad) delete grad;
         shape = std::move(other.shape);
         storageLength = other.storageLength;
         tens = other.tens;
@@ -193,7 +193,7 @@ __global__ void randomKernel(size_t storageLength, t* tens) {
     if (idx < storageLength) {
         curandState state;
         curand_init(clock64(), idx, 0, &state);
-        tens[idx] = curand_uniform(&state);
+        tens[idx] = 2 * curand_uniform(&state) - 1;
     }
 }
 
@@ -712,8 +712,9 @@ void tensor<t>::print() const {
             std::cout << ", ";
         }
     }
-    std::cout << "), device: " << (dev == device::CPU ? "CPU" : "GPU") << std::endl << std::endl;
+    std::cout << "), device: " << (dev == device::CPU ? "CPU" : "GPU") << std::endl;
     for (size_t i = 0; i < storageLength; ++i) {
+        if (!(i % shape[1])) std::cout << std::endl;
         std::cout << tempData[i] << " ";
     }
     std::cout << std::endl << std::endl;
@@ -1267,7 +1268,6 @@ tensor<t> tensor<t>::operator*(t val) const {
 template <typename t>
 __global__ void ReLUKernel(t*tens, t* out, size_t storageLength) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
-
     if (idx >= storageLength) return;
 
     if (tens[idx] >= 0) out[idx] = tens[idx];
@@ -1521,7 +1521,42 @@ tensor<t> tensor<t>::rowSum() const {
 
     return out;
 }
+template <typename t>
+__global__ void colSumKernel(t* tens, t* out, size_t rows, size_t cols) {
+    size_t col = blockIdx.x;
+    size_t pos = col;
+    __shared__ t temp[256];
+    temp[threadIdx.x] = 0;
+    __syncthreads();
 
+    for (int i = 0; i < rows; i++) {
+        if (threadIdx.x + blockDim.x * i >= rows) break;
+        temp[threadIdx.x] += tens[pos + (threadIdx.x + blockDim.x * i)*cols];
+    }
+    __syncthreads();
+    for (int i = 1; i < 256; i*=2) {
+        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256)) 
+        temp[threadIdx.x] += temp[threadIdx.x + i];
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) out[col] = temp[0];
+}
+template <typename t>
+tensor<t> tensor<t>::colSum() const {
+    toGPU();
+
+    tensor<t> out(device::GPU, 1, shape[1]);
+    rowSumKernel<<<shape[1], 256>>>(tens, out.tens, shape[0], shape[1]);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    return out;
+}
 
 template <typename t>
 __global__ void softmaxKernel(t* tens, t* sum, t* out, size_t row, size_t col) {
@@ -1654,6 +1689,56 @@ tensor<t> tensor<t>::softmax() && {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
         out.isGradEnabled = true;
         out.gradFunction = std::make_shared<softmaxNode<t>>(first);
+    }
+    return out;
+}
+
+template <typename t>
+__global__ void batchKernel(t* tens, t* out, size_t storageLength, size_t dataLen) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = tens[idx % dataLen];
+} 
+
+template <typename t>
+tensor<t> tensor<t>::batch(size_t batchSize) const & {
+    tensor<t> out;
+    if (shape[0] == 1) out = tensor<t>(dev, batchSize, shape[1]);
+    else throw std::invalid_argument("batch not optimized for horizontal batching!");
+    batchKernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, shape[1]);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<batchNode<t>>(this);
+    }
+    return out;
+}
+
+template <typename t>
+tensor<t> tensor<t>::batch(size_t batchSize) && {
+    tensor<t> out;
+    if (shape[0] == 1) out = tensor<t>(dev, batchSize, shape[1]);
+    else throw std::invalid_argument("batch not optimized for horizontal batching!");
+    batchKernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, shape[1]);
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    if (isGradEnabled) {
+        std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<batchNode<t>>(first);
     }
     return out;
 }

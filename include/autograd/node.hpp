@@ -20,7 +20,7 @@ class tensorRef {
     const tensor<t>* borrowed = nullptr;
     const std::shared_ptr<tensor<t>> rValue;
 public:
-    tensorRef(const std::shared_ptr<tensor<t>> rValue) : rValue(std::move(rValue)), borrowed(rValue.get()) {}
+    tensorRef(const std::shared_ptr<tensor<t>> rValue) : borrowed(rValue.get()), rValue(std::move(rValue)) {}
     tensorRef(const tensor<t>* borrowed) : borrowed(borrowed) {}
     const tensor<t>* operator->() const {return borrowed;}   
     const tensor<t>* get() const {return borrowed;}
@@ -221,5 +221,15 @@ class crossEntropyLossNode : public node<t> {
 public:
     std::vector<size_t> shape() override {return A->getShape();}
     crossEntropyLossNode(const tensor<t>* A, const tensor<t>* B) : A(A), B(B) {}
+    virtual void backward(const tensor<t>& owner) override;
+};
+
+template<typename t>
+class batchNode : public node<t> {
+    const tensorRef<t> A;
+public:
+    std::vector<size_t> shape() override {return A->getShape();}
+    batchNode(const tensor<t>* A) : A(A) {}
+    batchNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
 };

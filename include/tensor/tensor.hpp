@@ -268,7 +268,6 @@ public:
         if (grad) {
             delete grad;
         }
-
         grad = new tensor(device::GPU, gradFunction -> shape()[0], gradFunction -> shape()[1]);
         grad->ones();
 
@@ -288,6 +287,7 @@ public:
 
     tensor rowSum() const;
     tensor rowMax() const;
+    tensor colSum() const;
 
     // //Activation Functions
     tensor ReLU() const &;
@@ -300,4 +300,15 @@ public:
     tensor gelu() &&;
     tensor softmax() const &;
     tensor softmax() &&;
+
+    void clearGrad() {
+        if (grad) delete grad;
+    }
+
+    tensor batch(size_t batchSize) const &;
+    tensor batch(size_t batchSize) &&;
+
+    friend tensor operator*(t other, const tensor<t>& me) {
+        return me * other;
+    }
 };

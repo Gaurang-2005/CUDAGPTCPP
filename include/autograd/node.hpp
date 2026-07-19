@@ -227,9 +227,24 @@ public:
 template<typename t>
 class batchNode : public node<t> {
     const tensorRef<t> A;
+    const int axis;
 public:
     std::vector<size_t> shape() override {return A->getShape();}
-    batchNode(const tensor<t>* A) : A(A) {}
-    batchNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
+    batchNode(const tensor<t>* A, int axis) : A(A), axis(axis) {}
+    batchNode(const std::shared_ptr<tensor<t>> A, int axis) : A(A), axis(axis) {}
+    virtual void backward(const tensor<t>& owner) override;
+};
+
+template<typename t>
+class layerNormNode : public node<t> {
+    const tensorRef<t> gamma;
+    const tensorRef<t> beta;
+    const tensorRef<t> input;
+    const tensorRef<t> norm;
+    const tensorRef<t> inv;
+public:
+    std::vector<size_t> shape() override {return input->getShape();}
+    layerNormNode(const tensor<t>* gamma, const tensor<t>* beta, const std::shared_ptr<tensor<t>> norm, const std::shared_ptr<tensor<t>> inv, const tensor<t>* input) : gamma(gamma), beta(beta), norm(norm), inv(inv), input(input) {}
+    layerNormNode(const tensor<t>* gamma, const tensor<t>* beta, const std::shared_ptr<tensor<t>> norm, const std::shared_ptr<tensor<t>> inv, const std::shared_ptr<tensor<t>> input) : gamma(gamma), beta(beta), norm(norm), inv(inv), input(input) {}
     virtual void backward(const tensor<t>& owner) override;
 };

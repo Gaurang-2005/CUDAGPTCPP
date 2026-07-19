@@ -94,6 +94,64 @@ public:
 };
 
 template <typename t>
+class layernorm : public module<t> {
+    tensor<t> gamma;
+    tensor<t> beta;
+    tensor<t> epsilon;
+public:
+    layernorm(device dev, size_t inputs, t eps = t(1e-5)) : gamma(dev, 1, inputs), beta(dev, 1, inputs), epsilon(dev, 1, 1) {
+        gamma.ones();
+        beta.zeros();
+        epsilon.fill(eps);
+
+        gamma.requiresGrad(true);
+        beta.requiresGrad(true);
+        epsilon.requiresGrad(false);
+    }
+
+    tensor<t> forward(const tensor<t>& input) override {
+        epsilon.requiresGrad(false);
+        input.requiresGrad(false);
+        auto mean = input.rowSum() / input.getShape()[1];
+        auto centered = input - mean.batch(input.getShape()[1], 1);
+        auto var = centered.pow(2).rowSum() / input.getShape()[1];
+        auto std = (var + epsilon.batch(var.getShape()[0])).batch(centered.getShape()[1], 1).pow(-0.5);
+        auto norm = centered * std;
+        gamma.requiresGrad(false);
+        beta.requiresGrad(false);
+        auto out = norm * gamma.batch(norm.getShape()[0]) + beta.batch(norm.getShape()[0]);
+        gamma.requiresGrad(true);
+        beta.requiresGrad(true);
+        input.requiresGrad(true);
+        out.requiresGrad(true);
+        out.setGradientFunction(std::make_shared<layerNormNode<t>>(&gamma, &beta, std::make_shared<tensor<t>>(std::move(norm)), std::make_shared<tensor<t>>(std::move(std)), &input));
+        return out;
+    }
+    tensor<t> forward(tensor<t>&& input) override {
+        epsilon.requiresGrad(false);
+        input.requiresGrad(false);
+        auto mean = input.rowSum() / input.getShape()[1];
+        auto centered = input - mean.batch(input.getShape()[1], 1);
+        auto var = centered.pow(2).rowSum() / input.getShape()[1];
+        auto std = (var + epsilon.batch(var.getShape()[0])).batch(centered.getShape()[1], 1).pow(-0.5);
+        auto norm = centered * std;
+        gamma.requiresGrad(false);
+        beta.requiresGrad(false);
+        auto out = norm * gamma.batch(norm.getShape()[0]) + beta.batch(norm.getShape()[0]);
+        gamma.requiresGrad(true);
+        beta.requiresGrad(true);
+        input.requiresGrad(true);
+        out.requiresGrad(true);
+        std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(input));
+        out.setGradientFunction(std::make_shared<layerNormNode<t>>(&gamma, &beta, std::make_shared<tensor<t>>(std::move(norm)), std::make_shared<tensor<t>>(std::move(std)), first));
+        return out;
+    }
+    std::vector<tensor<t>*> parameters() override {
+        return std::vector<tensor<t>*>({&gamma, &beta});
+    }    
+};
+
+template <typename t>
 class sequential : public module<t> {
     std::vector<std::unique_ptr<module<t>>> modules; 
 public:

@@ -61,6 +61,9 @@ template class crossEntropyLossNode<double>;
 template class batchNode<float>;
 template class batchNode<double>;
 
+template class layerNormNode<float>;
+template class layerNormNode<double>;
+
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
@@ -391,9 +394,47 @@ void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
 template <typename t>
 void batchNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += owner.gradient()->colSum();
-    else A -> setGradient(new tensor(owner.gradient()->colSum()));
+    if (!axis) {    
+        if (A -> gradient()) *A -> gradient() += owner.gradient()->colSum();
+        else A -> setGradient(new tensor(owner.gradient()->colSum()));
+    }
+    else {
+        if (A -> gradient()) *A -> gradient() += owner.gradient()->rowSum();
+        else A -> setGradient(new tensor(owner.gradient()->rowSum()));
+    }
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+}
+
+template <typename t>
+void layerNormNode<t>::backward(const tensor<t>& owner) {
+    std::cout << "Incoming gradient:\n";
+    owner.gradient()->print();
+
+    std::cout << "Norm:\n";
+    norm->print();
+
+    auto betaGrad = owner.gradient()->colSum();
+    std::cout << "Computed beta grad:\n";
+    betaGrad.print();
+
+    auto gammaGrad = (*owner.gradient() * (*norm.get())).colSum();
+    std::cout << "Computed gamma grad:\n";
+    gammaGrad.print();
+    input->requiresGrad(false);
+    owner.gradient()->requiresGrad(false);
+    gamma->requiresGrad(false);
+    beta->requiresGrad(false);
+    if (beta-> gradient()) *beta-> gradient() += owner.gradient()->colSum();
+    else beta-> setGradient(new tensor(owner.gradient()->colSum()));
+    if (gamma-> gradient()) *gamma-> gradient() += (*owner.gradient() * (*norm.get())).colSum();
+    else gamma-> setGradient(new tensor((*owner.gradient() * (*norm.get())).colSum()));
+    if (input-> gradient()) *input-> gradient() += (gamma->batch(inv->getShape()[0]) * (*inv.get()))*(*owner.gradient() - (owner.gradient()->rowSum()/owner.gradient()->getShape()[1]).batch(owner.gradient()->getShape()[1], 1) - (*norm.get()) * ((*owner.gradient() * (*norm.get())).rowSum()/owner.gradient()->getShape()[1]).batch(norm->getShape()[1], 1));
+    else input-> setGradient(new tensor(((gamma->batch(inv->getShape()[0]) * (*inv.get()))*(*owner.gradient() - (owner.gradient()->rowSum()/owner.gradient()->getShape()[1]).batch(owner.gradient()->getShape()[1], 1) - (*norm.get()) * ((*owner.gradient() * (*norm.get())).rowSum()/owner.gradient()->getShape()[1]).batch(norm->getShape()[1], 1)))));
+    input -> requiresGrad(true);
+    gamma -> requiresGrad(true);
+    beta -> requiresGrad(true);
+
+    if (input-> gradientFunction()) input-> gradientFunction() -> backward(*input.get());
 }

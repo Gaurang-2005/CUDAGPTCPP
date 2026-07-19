@@ -277,6 +277,7 @@ public:
     tensor operator-() const;
 
     tensor operator*(t val) const;
+    tensor operator/(t val) const ;
 
     tensor exp() const &;
     tensor exp() &&;
@@ -305,8 +306,8 @@ public:
         if (grad) delete grad;
     }
 
-    tensor batch(size_t batchSize) const &;
-    tensor batch(size_t batchSize) &&;
+    tensor batch(size_t batchSize, int axis = 0) const &;
+    tensor batch(size_t batchSize, int axis = 0) &&;
 
     friend tensor operator*(t other, const tensor<t>& me) {
         return me * other;

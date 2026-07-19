@@ -1266,6 +1266,30 @@ tensor<t> tensor<t>::operator*(t val) const {
 }
 
 template <typename t>
+__global__ void digitDivideKernel(t* out, t* in, size_t storageLength, t val) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = in[idx] / val;
+}
+
+template <typename t>
+tensor<t> tensor<t>::operator/(t val) const {
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+    digitDivideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+
+    return out;
+}
+
+template <typename t>
 __global__ void ReLUKernel(t*tens, t* out, size_t storageLength) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
     if (idx >= storageLength) return;
@@ -1546,7 +1570,7 @@ tensor<t> tensor<t>::colSum() const {
     toGPU();
 
     tensor<t> out(device::GPU, 1, shape[1]);
-    rowSumKernel<<<shape[1], 256>>>(tens, out.tens, shape[0], shape[1]);
+    colSumKernel<<<shape[1], 256>>>(tens, out.tens, shape[0], shape[1]);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1694,7 +1718,7 @@ tensor<t> tensor<t>::softmax() && {
 }
 
 template <typename t>
-__global__ void batchKernel(t* tens, t* out, size_t storageLength, size_t dataLen) {
+__global__ void batch1Kernel(t* tens, t* out, size_t storageLength, size_t dataLen) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (idx >= storageLength) return;
@@ -1703,11 +1727,25 @@ __global__ void batchKernel(t* tens, t* out, size_t storageLength, size_t dataLe
 } 
 
 template <typename t>
-tensor<t> tensor<t>::batch(size_t batchSize) const & {
+__global__ void batch2Kernel(t* tens, t* out, size_t storageLength, size_t dataLen) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = tens[idx / dataLen];
+} 
+
+template <typename t>
+tensor<t> tensor<t>::batch(size_t batchSize, int axis) const & {
     tensor<t> out;
-    if (shape[0] == 1) out = tensor<t>(dev, batchSize, shape[1]);
-    else throw std::invalid_argument("batch not optimized for horizontal batching!");
-    batchKernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, shape[1]);
+    if (axis == 0) {
+        out = tensor<t>(dev, batchSize, shape[1]);
+        batch1Kernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, shape[1]);
+    }
+    if (axis == 1) {
+        out = tensor<t>(dev, shape[0], batchSize);
+        batch2Kernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, batchSize);
+    }
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1717,17 +1755,22 @@ tensor<t> tensor<t>::batch(size_t batchSize) const & {
     }
     if (isGradEnabled) {
         out.isGradEnabled = true;
-        out.gradFunction = std::make_shared<batchNode<t>>(this);
+        out.gradFunction = std::make_shared<batchNode<t>>(this, axis);
     }
     return out;
 }
 
 template <typename t>
-tensor<t> tensor<t>::batch(size_t batchSize) && {
+tensor<t> tensor<t>::batch(size_t batchSize, int axis) && {
     tensor<t> out;
-    if (shape[0] == 1) out = tensor<t>(dev, batchSize, shape[1]);
-    else throw std::invalid_argument("batch not optimized for horizontal batching!");
-    batchKernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, shape[1]);
+    if (axis == 0) {
+        out = tensor<t>(dev, batchSize, shape[1]);
+        batch1Kernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, shape[1]);
+    }
+    if (axis == 1) {
+        out = tensor<t>(dev, shape[0], batchSize);
+        batch2Kernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, batchSize);
+    }
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1738,7 +1781,7 @@ tensor<t> tensor<t>::batch(size_t batchSize) && {
     if (isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
         out.isGradEnabled = true;
-        out.gradFunction = std::make_shared<batchNode<t>>(first);
+        out.gradFunction = std::make_shared<batchNode<t>>(first, axis);
     }
     return out;
 }

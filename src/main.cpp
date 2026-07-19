@@ -921,47 +921,91 @@ void separator(const std::string& title) {
 #include "nn/optimizer.hpp"
 #include "loss/loss.hpp"
 
-int main() {
-    sequential<double> model(
-        linear<double>(device::GPU, 4, 2),
-        relu<double>(),
-        linear<double>(device::GPU, 1, 4)
-    );
+// int main() {
+//     sequential<double> model(
+//         linear<double>(device::GPU, 4, 2),
+//         relu<double>(),
+//         linear<double>(device::GPU, 1, 4)
+//     );
 
-    tensor<double> input(device::CPU, 4, 2);
-    tensor<double> target(device::CPU, 4, 1);
-    input(0, 0) = 0;
-    input(0, 1) = 0;
-    input(1, 0) = 1;
-    input(1, 1) = 0;
-    input(2, 0) = 0;
-    input(2, 1) = 1;
-    input(3, 0) = 1;
-    input(3, 1) = 1;
-    target(0, 0) = 0;
-    target(1, 0) = 1;
-    target(2, 0) = 1;
-    target(3, 0) = 0;
-    input.toGPU();
-    target.toGPU();
-    tensor<double> test(device::GPU, 2 ,1);
-    SGD<double> opti(model.parameters(), 0.0001);
-    for (int i = 0; i < 1000; i++) {
-        if (!(i%10))std::cout<<"Iteration: " << i << std::endl;
-        auto out = model.forward(input);
-        auto loss = crossEntropyLoss(out, target);
-        if (!i) {
-            input.print();
-            out.print();
-            loss.print();
-        }
-        loss.backward();
-        opti.step();
-        opti.zeroGrad();
-        if (!(i % 100)){
-            out.gradient()->print();
-            input.print();
-            out.print();
-        }
-    }
+//     tensor<double> input(device::CPU, 4, 2);
+//     tensor<double> target(device::CPU, 4, 1);
+//     input(0, 0) = 0;
+//     input(0, 1) = 0;
+//     input(1, 0) = 1;
+//     input(1, 1) = 0;
+//     input(2, 0) = 0;
+//     input(2, 1) = 1;
+//     input(3, 0) = 1;
+//     input(3, 1) = 1;
+//     target(0, 0) = 0;
+//     target(1, 0) = 1;
+//     target(2, 0) = 1;
+//     target(3, 0) = 0;
+//     input.toGPU();
+//     target.toGPU();
+//     tensor<double> test(device::GPU, 2 ,1);
+//     SGD<double> opti(model.parameters(), 0.0001);
+//     for (int i = 0; i < 1000; i++) {
+//         if (!(i%10))std::cout<<"Iteration: " << i << std::endl;
+//         auto out = model.forward(input);
+//         auto loss = crossEntropyLoss(out, target);
+//         if (!i) {
+//             input.print();
+//             out.print();
+//             loss.print();
+//         }
+//         loss.backward();
+//         opti.step();
+//         opti.zeroGrad();
+//         if (!(i % 100)){
+//             out.gradient()->print();
+//             input.print();
+//             out.print();
+//         }
+//     }
+// }
+
+
+int main()
+{
+    layernorm<float> ln(device::CPU, 4);
+
+    tensor<float> x(device::CPU, 2, 4);
+
+    x(0,0)=1.0f;
+    x(0,1)=2.0f;
+    x(0,2)=3.0f;
+    x(0,3)=4.0f;
+
+    x(1,0)=5.0f;
+    x(1,1)=6.0f;
+    x(1,2)=7.0f;
+    x(1,3)=8.0f;
+
+    x.requiresGrad(true);
+
+    auto y = ln.forward(x);
+
+    std::cout << "Forward:\n";
+    y.print();
+
+    tensor<float> target(device::CPU,2,4);
+    target.fill(0.0f);
+
+    tensor<float> loss = MSE(y, target);
+
+    std::cout << "Loss:\n";
+    loss.print();
+
+    loss.backward();
+
+    std::cout << "\nInput Gradient\n";
+    x.gradient()->print();
+
+    std::cout << "\nGamma Gradient\n";
+    ln.parameters()[0]->gradient()->print();
+
+    std::cout << "\nBeta Gradient\n";
+    ln.parameters()[1]->gradient()->print();
 }

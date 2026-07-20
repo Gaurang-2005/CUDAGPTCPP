@@ -248,3 +248,14 @@ public:
     layerNormNode(const tensor<t>* gamma, const tensor<t>* beta, const std::shared_ptr<tensor<t>> norm, const std::shared_ptr<tensor<t>> inv, const std::shared_ptr<tensor<t>> input) : gamma(gamma), beta(beta), norm(norm), inv(inv), input(input) {}
     virtual void backward(const tensor<t>& owner) override;
 };
+
+template<typename t>
+class embeddingNode : public node<t> {
+    const tensorRef<t> weight;
+    const size_t* tokenIds;
+    const size_t len;
+public:
+    std::vector<size_t> shape() override {return weight->getShape();}
+    embeddingNode(const tensor<t>* A, const size_t* tokenIds, const size_t len) : weight(A), tokenIds(tokenIds), len(len) {}
+    virtual void backward(const tensor<t>& owner) override;
+};

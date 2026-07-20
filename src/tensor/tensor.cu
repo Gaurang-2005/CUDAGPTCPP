@@ -64,6 +64,43 @@ tensor<t>::~tensor() {
 }
 
 template <typename t>
+tensor<t>::tensor(device dev, std::initializer_list<std::initializer_list<t>> list) : dev(dev) {
+    shape.push_back(list.size());
+    shape.push_back(list.begin()->size());
+    for (auto& i : shape) {
+        storageLength*=i;
+    }
+    tens = new t[storageLength]{};
+
+    size_t idx = 0;
+    for (const auto& row : list) {
+        if (row.size() != shape[1])
+            throw std::runtime_error("Initializer list rows have different lengths");
+        for (const auto& val : row) {
+            tens[idx++] = val;
+        }
+    }
+
+    if (dev == device::GPU) {
+        t* temp;
+        cudaError_t err = cudaMalloc(&temp, storageLength * sizeof(t));
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMalloc failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+        }
+        err = cudaMemcpy(temp, tens, storageLength * sizeof(t), cudaMemcpyDefault);
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMemcpy failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+        }
+        delete[] tens;
+        tens = temp;
+    }
+}
+
+template <typename t>
 tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other.storageLength), dev(other.dev) {
     if (dev == device::CPU) {
         tens = new t[storageLength];

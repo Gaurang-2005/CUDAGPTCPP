@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tensor/tensor.hpp"
+#include <thread>
 
 template <typename t>
 class module {
@@ -149,6 +150,30 @@ public:
     std::vector<tensor<t>*> parameters() override {
         return std::vector<tensor<t>*>({&gamma, &beta});
     }    
+};
+
+template <typename t>
+class embedding : public module<t> {
+    tensor<t> weight;
+
+public:
+    embedding(device dev, size_t vocabSize, size_t embeddingDim) : weight(dev, vocabSize, embeddingDim) {
+        weight.random();
+        weight.requiresGrad(true);
+    }  
+    tensor<t> forward(const tensor<t>&) override
+    {
+        throw std::runtime_error("Embedding expects token IDs.");
+    }
+
+    tensor<t> forward(tensor<t>&&) override
+    {
+        throw std::runtime_error("Embedding expects token IDs.");
+    }
+    tensor<t> forward(const size_t* input, size_t len);
+    std::vector<tensor<t>*> parameters() override {
+        return std::vector<tensor<t>*>({&weight});
+    }
 };
 
 template <typename t>

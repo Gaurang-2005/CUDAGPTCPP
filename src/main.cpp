@@ -967,45 +967,81 @@ void separator(const std::string& title) {
 // }
 
 
+// int main()
+// {
+//     layernorm<float> ln(device::CPU, 4);
+
+//     tensor<float> x(device::CPU, 2, 4);
+
+//     x(0,0)=1.0f;
+//     x(0,1)=2.0f;
+//     x(0,2)=3.0f;
+//     x(0,3)=4.0f;
+
+//     x(1,0)=5.0f;
+//     x(1,1)=6.0f;
+//     x(1,2)=7.0f;
+//     x(1,3)=8.0f;
+
+//     x.requiresGrad(true);
+
+//     auto y = ln.forward(x);
+
+//     std::cout << "Forward:\n";
+//     y.print();
+
+//     tensor<float> target(device::CPU,2,4);
+//     target.fill(0.0f);
+
+//     tensor<float> loss = MSE(y, target);
+
+//     std::cout << "Loss:\n";
+//     loss.print();
+
+//     loss.backward();
+
+//     std::cout << "\nInput Gradient\n";
+//     x.gradient()->print();
+
+//     std::cout << "\nGamma Gradient\n";
+//     ln.parameters()[0]->gradient()->print();
+
+//     std::cout << "\nBeta Gradient\n";
+//     ln.parameters()[1]->gradient()->print();
+// }
+
 int main()
 {
-    layernorm<float> ln(device::CPU, 4);
+    embedding<float> emb(device::GPU, 4, 3);
 
-    tensor<float> x(device::CPU, 2, 4);
-
-    x(0,0)=1.0f;
-    x(0,1)=2.0f;
-    x(0,2)=3.0f;
-    x(0,3)=4.0f;
-
-    x(1,0)=5.0f;
-    x(1,1)=6.0f;
-    x(1,2)=7.0f;
-    x(1,3)=8.0f;
-
-    x.requiresGrad(true);
-
-    auto y = ln.forward(x);
-
+    // Weight matrix
+    emb.parameters()[0]->print();
+    std::cout<<"passed! "<< std::endl;
+    size_t tokens[] =
+    {
+        2,
+        0,
+        2
+    };
+    std::cout<<"passed! "<< std::endl;
+    auto out = emb.forward(tokens, sizeof(tokens)/sizeof(tokens[0]));
+    std::cout<<"passed! "<< std::endl;
     std::cout << "Forward:\n";
-    y.print();
+    out.print();
 
-    tensor<float> target(device::CPU,2,4);
-    target.fill(0.0f);
+    // Give output a fake gradient
+    out.setGradient(new tensor<float>(
+        device::GPU,
+        {
+            {1,2,3},
+            {4,5,6},
+            {7,8,9}
+        }));
 
-    tensor<float> loss = MSE(y, target);
+    out.backward();
 
-    std::cout << "Loss:\n";
-    loss.print();
+    std::cout << "\nWeight Gradient:\n";
+    emb.parameters()[0]->gradient()->print();
 
-    loss.backward();
-
-    std::cout << "\nInput Gradient\n";
-    x.gradient()->print();
-
-    std::cout << "\nGamma Gradient\n";
-    ln.parameters()[0]->gradient()->print();
-
-    std::cout << "\nBeta Gradient\n";
-    ln.parameters()[1]->gradient()->print();
+    return 0;
 }

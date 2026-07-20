@@ -35,6 +35,9 @@ public:
             constructorAllocate();
         }
     }
+
+    tensor(device dev, std::initializer_list<std::initializer_list<t>> list);
+
     template <typename ... Args>
     requires (std::integral<Args> && ...)
     tensor(Args...args) : tensor(device::CPU, args...) {}

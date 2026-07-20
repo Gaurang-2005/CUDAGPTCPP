@@ -64,6 +64,9 @@ template class batchNode<double>;
 template class layerNormNode<float>;
 template class layerNormNode<double>;
 
+template class embeddingNode<float>;
+template class embeddingNode<double>;
+
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
@@ -131,8 +134,6 @@ void matMulNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
-    // if (A -> gradient()) (A -> gradient())->print();
-    // if (B -> gradient()) (B -> gradient())->print();
     if (A -> gradient()) *A -> gradient() += (*owner.gradient()).matMul(B -> transposed());
     else A -> setGradient(new tensor((*owner.gradient()).matMul(B -> transposed())));
     if (B -> gradient()) *B -> gradient() += (A -> transposed()).matMul(*owner.gradient());
@@ -410,18 +411,6 @@ void batchNode<t>::backward(const tensor<t>& owner) {
 template <typename t>
 void layerNormNode<t>::backward(const tensor<t>& owner) {
     std::cout << "Incoming gradient:\n";
-    owner.gradient()->print();
-
-    std::cout << "Norm:\n";
-    norm->print();
-
-    auto betaGrad = owner.gradient()->colSum();
-    std::cout << "Computed beta grad:\n";
-    betaGrad.print();
-
-    auto gammaGrad = (*owner.gradient() * (*norm.get())).colSum();
-    std::cout << "Computed gamma grad:\n";
-    gammaGrad.print();
     input->requiresGrad(false);
     owner.gradient()->requiresGrad(false);
     gamma->requiresGrad(false);
@@ -437,4 +426,48 @@ void layerNormNode<t>::backward(const tensor<t>& owner) {
     beta -> requiresGrad(true);
 
     if (input-> gradientFunction()) input-> gradientFunction() -> backward(*input.get());
+}
+
+template <typename t>
+__global__ void embeddingNodeKernel(t* grad, const t* outGrad, const size_t* token, const size_t len, const size_t dim) {
+    size_t tokenIdx = threadIdx.x + blockDim.x * blockIdx.x;
+    size_t dimIdx = threadIdx.y + blockDim.y * blockIdx.y;
+    
+    if (tokenIdx >= len || dimIdx >= dim) return;
+
+    atomicAdd(&grad[token[tokenIdx] * dim + dimIdx], outGrad[tokenIdx * dim + dimIdx]);
+}
+
+template <typename t>
+void embeddingNode<t>::backward(const tensor<t>& owner) {
+    weight->requiresGrad(false);
+    if (!weight->gradient()) {
+        weight->setGradient(new tensor<t>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
+        weight->gradient()->zeros();
+    }
+    size_t* temp;
+    cudaError_t err = cudaMalloc(&temp, len * sizeof(size_t));
+    if (err != cudaSuccess) {
+        std::cerr << "cudaMalloc failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    err = cudaMemcpy(temp, tokenIds, len * sizeof(size_t), cudaMemcpyDefault);
+    if (err != cudaSuccess) {
+        std::cerr << "cudaMemcpy failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }    
+    embeddingNodeKernel<<<dim3(cuda::ceil_div(len, 16),cuda::ceil_div(weight->getShape()[1], 16)), dim3(16, 16)>>>(weight->gradient()->data(), owner.gradient()->data(), temp, len, weight->getShape()[1]);
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    cudaFree(temp);
+    weight -> requiresGrad(true);
+
+    if (weight -> gradientFunction()) weight -> gradientFunction() -> backward(*weight.get());
 }

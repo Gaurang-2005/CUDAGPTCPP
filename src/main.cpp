@@ -1012,7 +1012,7 @@ void separator(const std::string& title) {
 
 int main()
 {
-    embedding<float> emb(device::GPU, 4, 3);
+    tokenEmbedding<float> emb(device::GPU, 4, 3);
 
     // Weight matrix
     emb.parameters()[0]->print();

@@ -11,6 +11,10 @@ public:
 
     virtual void step() = 0;
 
+    void add(const tensor<t>* parameter) {
+        parameters.push_back(parameter);
+    }
+
     void zeroGrad() {
         for (auto& i : parameters) i -> gradient() -> zeros();
     }

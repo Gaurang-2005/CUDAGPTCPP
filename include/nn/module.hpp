@@ -153,26 +153,44 @@ public:
 };
 
 template <typename t>
-class embedding : public module<t> {
+class tokenEmbedding {
     tensor<t> weight;
 
 public:
-    embedding(device dev, size_t vocabSize, size_t embeddingDim) : weight(dev, vocabSize, embeddingDim) {
+    tokenEmbedding(device dev, size_t vocabSize, size_t embeddingDim) : weight(dev, vocabSize, embeddingDim) {
         weight.random();
         weight.requiresGrad(true);
     }  
-    tensor<t> forward(const tensor<t>&) override
-    {
-        throw std::runtime_error("Embedding expects token IDs.");
-    }
-
-    tensor<t> forward(tensor<t>&&) override
-    {
-        throw std::runtime_error("Embedding expects token IDs.");
-    }
     tensor<t> forward(const size_t* input, size_t len);
+    tensor<t>* parameters() {
+        return &weight;
+    }
+};
+
+template <typename t>
+class positionEmbedding {
+    tensor<t> weight;
+
+public:
+    positionEmbedding(device dev, size_t vocabSize, size_t embeddingDim) : weight(dev, vocabSize, embeddingDim) {
+        weight.random();
+        weight.requiresGrad(true);
+    }  
+    tensor<t> forward(size_t len);
+    tensor<t>* parameters() {
+        return &weight;
+    }
+};
+
+template <typename t>
+class singleHeadAttention : public module<t> {
+public:
+    tensor<t> forward(const tensor<t>& input) override {
+    }
+    tensor<t> forward(tensor<t>&& input) override {
+    }
     std::vector<tensor<t>*> parameters() override {
-        return std::vector<tensor<t>*>({&weight});
+        return std::vector<tensor<t>*>({});
     }
 };
 

@@ -64,8 +64,11 @@ template class batchNode<double>;
 template class layerNormNode<float>;
 template class layerNormNode<double>;
 
-template class embeddingNode<float>;
-template class embeddingNode<double>;
+template class tokenEmbeddingNode<float>;
+template class tokenEmbeddingNode<double>;
+
+template class positionEmbeddingNode<float>;
+template class positionEmbeddingNode<double>;
 
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
@@ -429,7 +432,7 @@ void layerNormNode<t>::backward(const tensor<t>& owner) {
 }
 
 template <typename t>
-__global__ void embeddingNodeKernel(t* grad, const t* outGrad, const size_t* token, const size_t len, const size_t dim) {
+__global__ void tokenEmbeddingNodeKernel(t* grad, const t* outGrad, const size_t* token, const size_t len, const size_t dim) {
     size_t tokenIdx = threadIdx.x + blockDim.x * blockIdx.x;
     size_t dimIdx = threadIdx.y + blockDim.y * blockIdx.y;
     
@@ -439,7 +442,7 @@ __global__ void embeddingNodeKernel(t* grad, const t* outGrad, const size_t* tok
 }
 
 template <typename t>
-void embeddingNode<t>::backward(const tensor<t>& owner) {
+void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
     weight->requiresGrad(false);
     if (!weight->gradient()) {
         weight->setGradient(new tensor<t>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
@@ -458,7 +461,7 @@ void embeddingNode<t>::backward(const tensor<t>& owner) {
                 << cudaGetErrorString(err)
                 << '\n';
     }    
-    embeddingNodeKernel<<<dim3(cuda::ceil_div(len, 16),cuda::ceil_div(weight->getShape()[1], 16)), dim3(16, 16)>>>(weight->gradient()->data(), owner.gradient()->data(), temp, len, weight->getShape()[1]);
+    tokenEmbeddingNodeKernel<<<dim3(cuda::ceil_div(len, 16),cuda::ceil_div(weight->getShape()[1], 16)), dim3(16, 16)>>>(weight->gradient()->data(), owner.gradient()->data(), temp, len, weight->getShape()[1]);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -467,6 +470,34 @@ void embeddingNode<t>::backward(const tensor<t>& owner) {
                 << '\n';
     }
     cudaFree(temp);
+    weight -> requiresGrad(true);
+
+    if (weight -> gradientFunction()) weight -> gradientFunction() -> backward(*weight.get());
+}
+
+template <typename t>
+__global__ void positionEmbeddingNodeKernel(t* grad, const t* outGrad, const size_t storageLength) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    grad[idx] += outGrad[idx];
+}
+
+template <typename t>
+void positionEmbeddingNode<t>::backward(const tensor<t>& owner) {
+    weight->requiresGrad(false);
+    if (!weight->gradient()) {
+        weight->setGradient(new tensor<t>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
+        weight->gradient()->zeros();
+    }
+    positionEmbeddingNodeKernel<<<cuda::ceil_div(owner.gradient()->numElements(), 256), 256>>>(weight->gradient()->data(), owner.gradient()->data(), owner.gradient()->numElements());
+    cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
     weight -> requiresGrad(true);
 
     if (weight -> gradientFunction()) weight -> gradientFunction() -> backward(*weight.get());

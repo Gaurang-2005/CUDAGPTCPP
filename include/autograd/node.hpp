@@ -250,12 +250,22 @@ public:
 };
 
 template<typename t>
-class embeddingNode : public node<t> {
+class tokenEmbeddingNode : public node<t> {
     const tensorRef<t> weight;
     const size_t* tokenIds;
     const size_t len;
 public:
     std::vector<size_t> shape() override {return weight->getShape();}
-    embeddingNode(const tensor<t>* A, const size_t* tokenIds, const size_t len) : weight(A), tokenIds(tokenIds), len(len) {}
+    tokenEmbeddingNode(const tensor<t>* A, const size_t* tokenIds, const size_t len) : weight(A), tokenIds(tokenIds), len(len) {}
+    virtual void backward(const tensor<t>& owner) override;
+};
+
+template<typename t>
+class positionEmbeddingNode : public node<t> {
+    const tensorRef<t> weight;
+    const size_t len;
+public:
+    std::vector<size_t> shape() override {return weight->getShape();}
+    positionEmbeddingNode(const tensor<t>* A, const size_t len) : weight(A),  len(len) {}
     virtual void backward(const tensor<t>& owner) override;
 };

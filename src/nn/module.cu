@@ -8,6 +8,9 @@ template class tokenEmbedding<double>;
 template class positionEmbedding<float>;
 template class positionEmbedding<double>;
 
+template class singleHeadAttention<float>;
+template class singleHeadAttention<double>;
+
 template <typename t>
 __global__ void tokenEmbeddingKernel(t* output, const size_t* input, const t* weight, const size_t dim, const size_t storageLength) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
@@ -73,4 +76,29 @@ tensor<t> positionEmbedding<t>::forward(size_t len) {
     out.requiresGrad(true);
     out.setGradientFunction(std::make_shared<positionEmbeddingNode<t>>(&weight, len));
     return out;
+}
+
+template <typename t>
+__global__ void softmaxMaskKernel(t* scores, size_t rows, size_t cols) {
+    size_t idxR = threadIdx.x + blockDim.x * blockIdx.x;
+    size_t idxC = threadIdx.y + blockDim.y * blockIdx.y;
+
+    if (idxR >= rows || idxC >= cols) return;
+
+    if (idxR < idxC) scores[idxR * cols + idxC] = -INFINITY;
+}
+
+template <typename t>
+tensor<t> singleHeadAttention<t>::scaledDotProductAttention(const tensor<t>& Q, const tensor<t>& K, const tensor<t>& V, std::shared_ptr<tensor<t>>& score) const {
+    auto scores = Q.matMul(K.transposed());
+    scores = scores / std::sqrt(Q.getShape()[1]);   
+    softmaxMaskKernel<<<dim3(cuda::ceil_div(scores.getShape()[0], 16), cuda::ceil_div(scores.getShape()[1], 16)), dim3(16, 16)>>>(scores.data(), scores.getShape()[0], scores.getShape()[1]);
+    cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }    
+    score = std::make_shared<tensor<t>>(scores.softmax());
+    return score->matMul(V);
 }

@@ -305,8 +305,9 @@ public:
     tensor softmax() const &;
     tensor softmax() &&;
 
-    void clearGrad() {
+    void clearGrad() const {
         if (grad) delete grad;
+        grad = nullptr;
     }
 
     tensor batch(size_t batchSize, int axis = 0) const &;

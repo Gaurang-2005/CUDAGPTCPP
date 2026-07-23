@@ -70,6 +70,9 @@ template class tokenEmbeddingNode<double>;
 template class positionEmbeddingNode<float>;
 template class positionEmbeddingNode<double>;
 
+template class singleHeadAttentionNode<float>;
+template class singleHeadAttentionNode<double>;
+
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
@@ -501,4 +504,33 @@ void positionEmbeddingNode<t>::backward(const tensor<t>& owner) {
     weight -> requiresGrad(true);
 
     if (weight -> gradientFunction()) weight -> gradientFunction() -> backward(*weight.get());
+}
+
+template <typename t>
+void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
+    input->requiresGrad(false);
+    owner.gradient()->requiresGrad(false);
+    wQuery->requiresGrad(false);
+    wKey->requiresGrad(false);
+    wVal->requiresGrad(false);
+
+    auto dV = score->transposed().matMul(*owner.gradient());
+    if (score-> gradient()) *score-> gradient() += owner.gradient()->matMul(V->transposed());
+    else score-> setGradient(new tensor(owner.gradient()->matMul(V->transposed())));
+    if (wVal-> gradient()) *wVal-> gradient() += input->transposed().matMul(dV);
+    else wVal-> setGradient(new tensor(input->transposed().matMul(dV)));
+    tensor<t> tempSoftGrad(device::GPU, score->getShape()[0], score->getShape()[1]);
+    softmaxNode<t> temp(&tempSoftGrad);
+    temp.backward(*score.get());
+    auto& softmaxGrad = *tempSoftGrad.gradient();
+    softmaxGrad = softmaxGrad / sqrt(wQuery->getShape()[1]);
+    auto dQ = softmaxGrad.matMul(*K.get());
+    auto dK = softmaxGrad.transposed().matMul(*Q.get());
+    if (wKey-> gradient()) *wKey-> gradient() += input->transposed().matMul(dK);
+    else wKey-> setGradient(new tensor(input->transposed().matMul(dK)));
+    if (wQuery-> gradient()) *wQuery-> gradient() += input->transposed().matMul(dQ);
+    else wQuery-> setGradient(new tensor(input->transposed().matMul(dQ)));
+    if (input-> gradient()) *input-> gradient() += dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed());
+    else input-> setGradient(new tensor(dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed())));
+    score->clearGrad();
 }

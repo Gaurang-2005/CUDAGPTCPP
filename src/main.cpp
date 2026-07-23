@@ -1010,38 +1010,57 @@ void separator(const std::string& title) {
 //     ln.parameters()[1]->gradient()->print();
 // }
 
-int main()
-{
-    tokenEmbedding<float> emb(device::GPU, 4, 3);
+int main() {
+    constexpr size_t batch = 1;
+    constexpr size_t seqLen = 3;
+    constexpr size_t headDim = 4;
 
-    // Weight matrix
-    emb.parameters()[0]->print();
-    std::cout<<"passed! "<< std::endl;
-    size_t tokens[] =
-    {
-        2,
-        0,
-        2
-    };
-    std::cout<<"passed! "<< std::endl;
-    auto out = emb.forward(tokens, sizeof(tokens)/sizeof(tokens[0]));
-    std::cout<<"passed! "<< std::endl;
-    std::cout << "Forward:\n";
-    out.print();
+    // Create input
+    tensor<float> input(device::GPU, batch * seqLen, headDim);
+    input.random();
+    input.requiresGrad(true);
 
-    // Give output a fake gradient
-    out.setGradient(new tensor<float>(
-        device::GPU,
-        {
-            {1,2,3},
-            {4,5,6},
-            {7,8,9}
-        }));
+    // Create attention
+    singleHeadAttention<float> attention(device::GPU, headDim);
 
-    out.backward();
+    // Forward
+    auto output = attention.forward(input);
 
-    std::cout << "\nWeight Gradient:\n";
-    emb.parameters()[0]->gradient()->print();
+    std::cout << "Input:\n";
+    input.print();
+
+    std::cout << "Output:\n";
+    output.print();
+
+    // Simple loss
+    auto loss = output.sum();
+
+    std::cout << "Loss:\n";
+    loss.print();
+
+    // Backward
+    loss.backward();
+
+    std::cout << "\ndInput\n";
+    input.gradient()->print();
+
+    std::cout << "\ndWq\n";
+    attention.parameters()[0]->gradient()->print();
+
+    std::cout << "\ndWk\n";
+    attention.parameters()[1]->gradient()->print();
+
+    std::cout << "\ndWv\n";
+    attention.parameters()[2]->gradient()->print();
+
+    std::cout << "Wq\n";
+    attention.parameters()[0]->print();
+
+    std::cout << "Wk\n";
+    attention.parameters()[1]->print();
+
+    std::cout << "Wv\n";
+    attention.parameters()[2]->print();
 
     return 0;
 }

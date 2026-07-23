@@ -184,13 +184,98 @@ public:
 
 template <typename t>
 class singleHeadAttention : public module<t> {
+    tensor<t> wQuery;
+    tensor<t> wKey;
+    tensor<t> wVal;
+
+    tensor<t> scaledDotProductAttention(const tensor<t>& q, const tensor<t>& k, const tensor<t>& v, std::shared_ptr<tensor<t>>& score) const;
 public:
+    singleHeadAttention(device dev, size_t embedDim) : wQuery(dev, embedDim, embedDim), wKey(dev, embedDim, embedDim), wVal(dev, embedDim, embedDim) {
+        wQuery.random();
+        wKey.random();
+        wVal.random();
+        wQuery.requiresGrad(true);
+        wKey.requiresGrad(true);
+        wVal.requiresGrad(true);
+    }
     tensor<t> forward(const tensor<t>& input) override {
+        wQuery.requiresGrad(false);
+        wKey.requiresGrad(false);
+        wVal.requiresGrad(false);
+        input.requiresGrad(false);
+        auto Q = std::make_shared<tensor<t>>(input.matMul(wQuery));
+        auto K = std::make_shared<tensor<t>>(input.matMul(wKey));
+        auto V = std::make_shared<tensor<t>>(input.matMul(wVal));
+        wQuery.requiresGrad(true);
+        wKey.requiresGrad(true);
+        wVal.requiresGrad(true);
+        input.requiresGrad(true);
+        std::shared_ptr<tensor<t>> score;
+        auto out = scaledDotProductAttention(*Q, *K, *V, score);
+        out.requiresGrad(true);
+        out.setGradientFunction(std::make_shared<singleHeadAttentionNode<t>>(Q, K, V, &input, &wQuery, &wKey, &wVal, score));
+        return out;
     }
     tensor<t> forward(tensor<t>&& input) override {
+        wQuery.requiresGrad(false);
+        wKey.requiresGrad(false);
+        wVal.requiresGrad(false);
+        input.requiresGrad(false);
+        auto Q = std::make_shared<tensor<t>>(input.matMul(wQuery));
+        auto K = std::make_shared<tensor<t>>(input.matMul(wKey));
+        auto V = std::make_shared<tensor<t>>(input.matMul(wVal));
+        wQuery.requiresGrad(true);
+        wKey.requiresGrad(true);
+        wVal.requiresGrad(true);
+        input.requiresGrad(true);
+        std::shared_ptr<tensor<t>> score;
+        auto out = scaledDotProductAttention(*Q, *K, *V, score);
+        out.requiresGrad(true);
+        out.setGradientFunction(std::make_shared<singleHeadAttentionNode<t>>(Q, K, V, std::make_shared<tensor<t>>(std::move(input)), &wQuery, &wKey, &wVal, score));
+        return out;
     }
     std::vector<tensor<t>*> parameters() override {
-        return std::vector<tensor<t>*>({});
+        return std::vector<tensor<t>*>({&wQuery, &wKey, &wVal});
+    }
+};
+
+template <typename t>
+class residual : public module<t> {
+    std::unique_ptr<module<t>> branch;
+public:
+template<typename Module>
+requires std::derived_from<std::decay_t<Module>, module<t>>
+    residual(Module&& mod) : branch(std::make_unique<std::decay_t<Module>>(std::forward<Module>(mod))) {}                                          
+    tensor<t> forward(const tensor<t>& input) override {
+        return input + branch->forward(input);
+    }
+    tensor<t> forward(tensor<t>&& input) override {
+        auto input2 = input;
+        return std::move(input) + branch->forward(std::move(input2));
+    }
+    std::vector<tensor<t>*> parameters() override {
+        return branch->parameters();
+    }
+};
+
+template <typename t>
+class feedForward : public module<t> {
+    linear<t> layer1;
+    gelu<t> activation;
+    linear<t> layer2;
+public:
+    feedForward(device dev, size_t embedDim) : layer1(dev, embedDim * 4, embedDim), layer2(dev, embedDim, embedDim * 4) {}
+    tensor<t> forward(const tensor<t>& input) override {
+        return layer2.forward(activation.forward(layer1.forward(input)));
+    }
+    tensor<t> forward(tensor<t>&& input) override {
+        return layer2.forward(activation.forward(layer1.forward(std::move(input))));
+    }
+    std::vector<tensor<t>*> parameters() override {
+        std::vector<tensor<t>*> out;
+        for (auto& i : layer1.parameters()) out.push_back(i);
+        for (auto& i : layer2.parameters()) out.push_back(i);
+        return out;
     }
 };
 

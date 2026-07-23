@@ -143,9 +143,11 @@ tensor<t>& tensor<t>::operator=(const tensor& other) {
     if (this != &other) {
         if (dev == device::GPU) {
             cudaFree(tens);
+            tens = nullptr;
         }
         else if (dev == device::CPU) {
             delete[] tens;
+            tens = nullptr;
         }
         shape = other.shape;
         storageLength = other.storageLength;
@@ -178,11 +180,14 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
     if (this != &other) {
         if (dev == device::GPU) {
             cudaFree(tens);
+            tens = nullptr;
         }
         else if (dev == device::CPU) {
             delete[] tens;
+            tens = nullptr;
         }
         if (grad) delete grad;
+        grad = nullptr;
         shape = std::move(other.shape);
         storageLength = other.storageLength;
         tens = other.tens;

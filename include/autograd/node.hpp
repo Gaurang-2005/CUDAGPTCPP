@@ -269,3 +269,20 @@ public:
     positionEmbeddingNode(const tensor<t>* A, const size_t len) : weight(A),  len(len) {}
     virtual void backward(const tensor<t>& owner) override;
 };
+
+template<typename t>
+class singleHeadAttentionNode : public node<t> {
+    const tensorRef<t> Q;
+    const tensorRef<t> K;
+    const tensorRef<t> V;
+    const tensorRef<t> input;
+    const tensorRef<t> wQuery;
+    const tensorRef<t> wKey;
+    const tensorRef<t> wVal;
+    const tensorRef<t> score;    
+public:
+    std::vector<size_t> shape() override {return input->getShape();}
+    singleHeadAttentionNode(const std::shared_ptr<tensor<t>> Q, const std::shared_ptr<tensor<t>> K, const std::shared_ptr<tensor<t>> V, const tensor<t>* input, const tensor<t>* wQuery, const tensor<t>* wKey, const tensor<t>* wVal, const std::shared_ptr<tensor<t>> score) : Q(Q),  K(K), V(V), input(input), wQuery(wQuery), wKey(wKey), wVal(wVal), score(score) {}
+    singleHeadAttentionNode(const std::shared_ptr<tensor<t>> Q, const std::shared_ptr<tensor<t>> K, const std::shared_ptr<tensor<t>> V, const std::shared_ptr<tensor<t>> input, const tensor<t>* wQuery, const tensor<t>* wKey, const tensor<t>* wVal, const std::shared_ptr<tensor<t>> score) : Q(Q),  K(K), V(V), input(input), wQuery(wQuery), wKey(wKey), wVal(wVal), score(score) {}
+    virtual void backward(const tensor<t>& owner) override;
+};

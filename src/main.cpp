@@ -1011,56 +1011,51 @@ void separator(const std::string& title) {
 // }
 
 int main() {
-    constexpr size_t batch = 1;
-    constexpr size_t seqLen = 3;
-    constexpr size_t headDim = 4;
+    constexpr size_t embedDim = 8;
 
-    // Create input
-    tensor<float> input(device::GPU, batch * seqLen, headDim);
-    input.random();
+    transformerBlock<float> block(device::GPU, embedDim);
+
+    // 4 tokens, embedding dimension = 8
+    tensor<float> input(device::GPU, 4, embedDim);
     input.requiresGrad(true);
-
-    // Create attention
-    singleHeadAttention<float> attention(device::GPU, headDim);
-
-    // Forward
-    auto output = attention.forward(input);
+    input.random();
 
     std::cout << "Input:\n";
     input.print();
 
-    std::cout << "Output:\n";
+    auto output = block.forward(input);
+
+    std::cout << "\nOutput:\n";
     output.print();
 
-    // Simple loss
-    auto loss = output.sum();
+    std::cout << "\nParameter count: "
+              << block.parameters().size()
+              << std::endl;
 
-    std::cout << "Loss:\n";
-    loss.print();
-
-    // Backward
-    loss.backward();
-
-    std::cout << "\ndInput\n";
+    output.backward();
+    std::cout << "input gradient: " << std::endl;
     input.gradient()->print();
 
-    std::cout << "\ndWq\n";
-    attention.parameters()[0]->gradient()->print();
+    auto params = block.parameters();
 
-    std::cout << "\ndWk\n";
-    attention.parameters()[1]->gradient()->print();
+    for (size_t i = 0; i < params.size(); i++) {
+        std::cout << "Parameter " << i << '\n';
 
-    std::cout << "\ndWv\n";
-    attention.parameters()[2]->gradient()->print();
+        if (params[i]->gradient())
+            params[i]->gradient()->print();
+        else
+            std::cout << "No gradient\n";
+    }
+    layernorm<float> temp(device::GPU, 8);
+    auto out2 = temp.forward(input);
+    out2.backward();
+    for (size_t i = 0; i < temp.parameters().size(); i++) {
+        std::cout << "Parameter " << i << '\n';
 
-    std::cout << "Wq\n";
-    attention.parameters()[0]->print();
-
-    std::cout << "Wk\n";
-    attention.parameters()[1]->print();
-
-    std::cout << "Wv\n";
-    attention.parameters()[2]->print();
-
+        if (temp.parameters()[i]->gradient())
+            temp.parameters()[i]->gradient()->print();
+        else
+            std::cout << "No gradient\n";
+    }
     return 0;
 }

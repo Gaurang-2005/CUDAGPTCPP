@@ -60,7 +60,9 @@ tensor<t>::~tensor() {
     else if (dev == device::CPU) {
         delete[] tens;
     }
-    if (grad) delete grad;
+    if (refCount) (*refCount)--;
+    if (grad && !refCount || grad && *refCount == 0) delete grad;
+    if (refCount && *refCount == 0) delete refCount;
 }
 
 template <typename t>
@@ -98,6 +100,7 @@ tensor<t>::tensor(device dev, std::initializer_list<std::initializer_list<t>> li
         delete[] tens;
         tens = temp;
     }
+    refCount = new int(1);
 }
 
 template <typename t>
@@ -122,8 +125,10 @@ tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other
     }
     isGradEnabled = other.isGradEnabled;
     grad = nullptr;
-    if (other.grad) grad = new tensor(*other.grad);
+    if (other.grad) grad = other.grad;
     gradFunction = other.gradFunction;
+    refCount = other.refCount;
+    (*refCount)++;
 }
 
 template <typename t>
@@ -136,6 +141,8 @@ tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), stor
     other.isGradEnabled = false;
     other.grad = nullptr;
     other.gradFunction = nullptr;
+    refCount = other.refCount;
+    other.refCount = nullptr;
 }
 
 template <typename t>
@@ -153,9 +160,14 @@ tensor<t>& tensor<t>::operator=(const tensor& other) {
         storageLength = other.storageLength;
         dev = other.dev;
         isGradEnabled = other.isGradEnabled;
-        if (grad) delete grad;
+        (*refCount)--;
+        if (grad && !(*refCount)) delete grad;
         grad = nullptr;
-        if (other.grad) grad = new tensor(*other.grad);
+        if (other.grad) grad = other.grad;
+        if (!(*refCount)) delete refCount;
+        refCount = nullptr;
+        refCount = other.refCount;
+        (*refCount)++;
         gradFunction = other.gradFunction;
         if (dev == device::CPU) {
             tens = new t[storageLength];
@@ -186,7 +198,8 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
             delete[] tens;
             tens = nullptr;
         }
-        if (grad) delete grad;
+        (*refCount)--;
+        if (grad && !(*refCount)) delete grad;
         grad = nullptr;
         shape = std::move(other.shape);
         storageLength = other.storageLength;
@@ -200,6 +213,10 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
         other.isGradEnabled = false;
         other.grad = nullptr;
         other.gradFunction = nullptr;
+        if (refCount && !(*refCount)) delete refCount;
+        refCount = nullptr;
+        refCount = other.refCount;
+        other.refCount = nullptr;
     }
     return *this;
 }

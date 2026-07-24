@@ -416,7 +416,6 @@ void batchNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void layerNormNode<t>::backward(const tensor<t>& owner) {
-    std::cout << "Incoming gradient:\n";
     input->requiresGrad(false);
     owner.gradient()->requiresGrad(false);
     gamma->requiresGrad(false);
@@ -513,7 +512,6 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
     wQuery->requiresGrad(false);
     wKey->requiresGrad(false);
     wVal->requiresGrad(false);
-
     auto dV = score->transposed().matMul(*owner.gradient());
     if (score-> gradient()) *score-> gradient() += owner.gradient()->matMul(V->transposed());
     else score-> setGradient(new tensor(owner.gradient()->matMul(V->transposed())));
@@ -522,6 +520,7 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
     tensor<t> tempSoftGrad(device::GPU, score->getShape()[0], score->getShape()[1]);
     softmaxNode<t> temp(&tempSoftGrad);
     temp.backward(*score.get());
+    score->requiresGrad(false);
     auto& softmaxGrad = *tempSoftGrad.gradient();
     softmaxGrad = softmaxGrad / sqrt(wQuery->getShape()[1]);
     auto dQ = softmaxGrad.matMul(*K.get());
@@ -532,5 +531,10 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
     else wQuery-> setGradient(new tensor(input->transposed().matMul(dQ)));
     if (input-> gradient()) *input-> gradient() += dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed());
     else input-> setGradient(new tensor(dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed())));
+    wQuery->requiresGrad(true);
+    wKey->requiresGrad(true);
+    wVal->requiresGrad(true);
+    input->requiresGrad(true);
     score->clearGrad();
+    if (input -> gradientFunction()) input -> gradientFunction() -> backward(*input.get());
 }

@@ -20,6 +20,7 @@ class tensor {
     mutable std::shared_ptr<node<t>> gradFunction = nullptr;
     mutable tensor* grad = nullptr;
     bool isIdentity = false;
+    int* refCount;
 public:
     template <typename ... Args>
     requires (std::integral<Args> && ...)
@@ -34,6 +35,7 @@ public:
         else if (dev == device::GPU) {
             constructorAllocate();
         }
+        refCount = new int(1);
     }
 
     tensor(device dev, std::initializer_list<std::initializer_list<t>> list);

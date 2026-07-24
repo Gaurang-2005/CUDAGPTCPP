@@ -241,20 +241,20 @@ public:
 
 template <typename t>
 class residual : public module<t> {
-    std::unique_ptr<module<t>> branch;
+     module<t>& branch;
 public:
-template<typename Module>
-requires std::derived_from<std::decay_t<Module>, module<t>>
-    residual(Module&& mod) : branch(std::make_unique<std::decay_t<Module>>(std::forward<Module>(mod))) {}                                          
+    template <typename Module>
+    requires std::derived_from<std::decay_t<Module>, module<t>>
+    residual(Module& mod) : branch(mod) {}                                          
     tensor<t> forward(const tensor<t>& input) override {
-        return input + branch->forward(input);
+        return input + branch.forward(input);
     }
     tensor<t> forward(tensor<t>&& input) override {
         auto input2 = input;
-        return std::move(input) + branch->forward(std::move(input2));
+        return std::move(input) + branch.forward(std::move(input2));
     }
     std::vector<tensor<t>*> parameters() override {
-        return branch->parameters();
+        return branch.parameters();
     }
 };
 
@@ -275,6 +275,35 @@ public:
         std::vector<tensor<t>*> out;
         for (auto& i : layer1.parameters()) out.push_back(i);
         for (auto& i : layer2.parameters()) out.push_back(i);
+        return out;
+    }
+};
+
+template <typename t>
+class transformerBlock : public module<t> {
+    layernorm<t> layerNorm1;
+    singleHeadAttention<t> attention;
+    layernorm<t> layerNorm2;
+    feedForward<t> ff;
+public:
+    transformerBlock(device dev, size_t embedDim) : layerNorm1(dev, embedDim), attention(dev, embedDim), layerNorm2(dev, embedDim), ff(dev, embedDim) {}
+    tensor<t> forward(const tensor<t>& input) override {
+        auto y = attention.forward(layerNorm1.forward(input)) + input;
+        auto y2 = y;
+        return ff.forward(layerNorm2.forward(std::move(y))) + std::move(y2) ;
+    }
+    tensor<t> forward(tensor<t>&& input) override {
+        auto input2 = input;
+        auto y = attention.forward(layerNorm1.forward(std::move(input))) + std::move(input2);
+        auto y2 = y;
+        return ff.forward(layerNorm2.forward(std::move(y))) + std::move(y2) ;
+    }
+    std::vector<tensor<t>*> parameters() override {
+        std::vector<tensor<t>*> out;
+        for (auto& i : layerNorm1.parameters()) out.push_back(i);
+        for (auto& i : attention.parameters()) out.push_back(i);
+        for (auto& i : layerNorm2.parameters()) out.push_back(i);
+        for (auto& i : ff.parameters()) out.push_back(i);
         return out;
     }
 };

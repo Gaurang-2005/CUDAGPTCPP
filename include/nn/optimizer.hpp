@@ -18,6 +18,9 @@ public:
     void zeroGrad() {
         for (auto& i : parameters) i -> gradient() -> zeros();
     }
+    void clearGrad() {
+        for (auto& i : parameters) i -> clearGrad();
+    }
 };
 
 template <typename t>

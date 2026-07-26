@@ -91,7 +91,7 @@ __global__ void softmaxMaskKernel(t* scores, size_t rows, size_t cols) {
 template <typename t>
 tensor<t> singleHeadAttention<t>::scaledDotProductAttention(const tensor<t>& Q, const tensor<t>& K, const tensor<t>& V, std::shared_ptr<tensor<t>>& score) const {
     auto scores = Q.matMul(K.transposed());
-    scores = scores / std::sqrt(Q.getShape()[1]);   
+    scores = scores / std::sqrt(Q.getShape()[1]);
     softmaxMaskKernel<<<dim3(cuda::ceil_div(scores.getShape()[0], 16), cuda::ceil_div(scores.getShape()[1], 16)), dim3(16, 16)>>>(scores.data(), scores.getShape()[0], scores.getShape()[1]);
     cudaError_t err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {

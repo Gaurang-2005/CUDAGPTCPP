@@ -78,14 +78,16 @@ void addNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
     B->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += *owner.gradient();
-    else A -> setGradient(new tensor(*owner.gradient()));
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
     if (B -> gradient()) *B -> gradient() += *owner.gradient();
-    else B -> setGradient(new tensor(*owner.gradient()));
+    else B -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
     A->requiresGrad(true);
     B->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
+    A -> clearGradientFunction();
+    B -> clearGradientFunction();
 }
 
 template <typename t>
@@ -93,14 +95,16 @@ void subtractNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
     B->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += *owner.gradient();
-    else A -> setGradient(new tensor(*owner.gradient()));
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
     if (B -> gradient()) *B -> gradient() -= *owner.gradient();
-    else B -> setGradient(new tensor(-*owner.gradient()));
+    else B -> setGradient(std::make_shared<tensor<t>>(-*owner.gradient()));
     A->requiresGrad(true);
     B->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
+    A -> clearGradientFunction();
+    B -> clearGradientFunction();
 }
 
 template <typename t>
@@ -109,14 +113,16 @@ void multiplyNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
     B->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
-    else A -> setGradient(new tensor(*owner.gradient() * (*B.get())));
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
     if (B -> gradient()) *B -> gradient() += *owner.gradient() * (*A.get());
-    else B -> setGradient(new tensor(*owner.gradient() * (*A.get())));
+    else B -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*A.get())));
     A->requiresGrad(true);
     B->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
+    A -> clearGradientFunction();
+    B -> clearGradientFunction();
 }
 
 template <typename t>
@@ -125,14 +131,16 @@ void divideNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
     B->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B.get());
-    else A -> setGradient(new tensor(*owner.gradient() / (*B.get())));
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() / (*B.get())));
     if (B -> gradient()) *B -> gradient() -= (*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()));
-    else B -> setGradient(new tensor(-(*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))));
+    else B -> setGradient(std::make_shared<tensor<t>>(-(*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))));
     A->requiresGrad(true);
     B->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
+    A -> clearGradientFunction();
+    B -> clearGradientFunction();
 }
 
 template <typename t>
@@ -140,15 +148,18 @@ void matMulNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
+    // std::cout<<A->getShape()[0]<<' '<<A->getShape()[1]<<'\n';
     if (A -> gradient()) *A -> gradient() += (*owner.gradient()).matMul(B -> transposed());
-    else A -> setGradient(new tensor((*owner.gradient()).matMul(B -> transposed())));
+    else A -> setGradient(std::make_shared<tensor<t>>((*owner.gradient()).matMul(B -> transposed())));
     if (B -> gradient()) *B -> gradient() += (A -> transposed()).matMul(*owner.gradient());
-    else B -> setGradient(new tensor((A -> transposed()).matMul(*owner.gradient())));
+    else B -> setGradient(std::make_shared<tensor<t>>((A -> transposed()).matMul(*owner.gradient())));
     A->requiresGrad(true);
     B->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
+    A -> clearGradientFunction();
+    B -> clearGradientFunction();
 }
 
 template <typename t>
@@ -156,10 +167,11 @@ void transposeNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += (*owner.gradient()).transposed();
-    else A -> setGradient(new tensor((*owner.gradient()).transposed()));
+    else A -> setGradient(std::make_shared<tensor<t>>((*owner.gradient()).transposed()));
     A->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -170,10 +182,11 @@ void sumNode<t>::backward(const tensor<t>& owner) {
     owner.gradient()->toCPU();
     temp.fill(owner.gradient()->data()[0]);
     if (A -> gradient()) *A -> gradient() += temp;
-    else A -> setGradient(new tensor(temp));
+    else A -> setGradient(std::make_shared<tensor<t>>(temp));
     A->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -184,10 +197,11 @@ void meanNode<t>::backward(const tensor<t>& owner) {
     owner.gradient()->toCPU();
     temp.fill(owner.gradient()->data()[0]/temp.numElements());
     if (A -> gradient()) *A -> gradient() += temp;
-    else A -> setGradient(new tensor(temp));
+    else A -> setGradient(std::make_shared<tensor<t>>(temp));
     A->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
     
 template <typename t>
@@ -195,10 +209,11 @@ void reshapeNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += owner.gradient()->reshaped(oldShape[0], oldShape[1]);
-    else A -> setGradient(new tensor(owner.gradient()->reshaped(oldShape[0], oldShape[1])));
+    else A -> setGradient(std::make_shared<tensor<t>>(owner.gradient()->reshaped(oldShape[0], oldShape[1])));
     A->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -206,10 +221,11 @@ void expNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * A -> exp();
-    else A -> setGradient(new tensor(*(owner.gradient()) * A -> exp()));
+    else A -> setGradient(std::make_shared<tensor<t>>(*(owner.gradient()) * A -> exp()));
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -219,10 +235,11 @@ void logNode<t>::backward(const tensor<t>& owner) {
     tensor<t> temp(*A.get());
     temp.ones();
     if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * temp / *A.get();
-    else A -> setGradient(new tensor(*(owner.gradient()) * temp / *A.get()));
+    else A -> setGradient(std::make_shared<tensor<t>>(*(owner.gradient()) * temp / *A.get()));
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -230,10 +247,11 @@ void powNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * A -> pow(power - 1) * power;
-    else A -> setGradient(new tensor(*(owner.gradient()) * A -> pow(power - 1) * power));
+    else A -> setGradient(std::make_shared<tensor<t>>(*(owner.gradient()) * A -> pow(power - 1) * power));
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -261,10 +279,11 @@ void reluNode<t>::backward(const tensor<t>& owner) {
     }
 
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * temp;
-    else A -> setGradient(new tensor(*owner.gradient() * temp));
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * temp));
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -275,10 +294,11 @@ void sigmoidNode<t>::backward(const tensor<t>& owner) {
     one.ones();
     tensor<t> temp = owner * (one - owner);
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * temp;
-    else A -> setGradient(new tensor(*owner.gradient() * temp));
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * temp));
     A -> requiresGrad(true);
     owner.requiresGrad(true);
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -290,10 +310,11 @@ void tanhNode<t>::backward(const tensor<t>& owner) {
     one.ones();
     temp = one - temp;
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * temp;
-    else A -> setGradient(new tensor(*owner.gradient() * temp));
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * temp));
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -327,10 +348,11 @@ void geluNode<t>::backward(const tensor<t>& owner) {
     }
     
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * temp;
-    else A -> setGradient(new tensor(*owner.gradient() * temp));
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * temp));
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -345,6 +367,8 @@ __global__ void broadcastSubtractKernel(t* A, t* B, t* out, size_t row, size_t c
 
 template <typename t>
 void softmaxNode<t>::backward(const tensor<t>& owner) {
+    // std::cout << "Backward, A = " << A.get() << '\n';
+    // std::cout<<A->numElements()<<"run\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     owner.requiresGrad(false);
@@ -361,11 +385,12 @@ void softmaxNode<t>::backward(const tensor<t>& owner) {
                 << '\n';
     }
     if (A -> gradient()) *A -> gradient() += owner * temp;
-    else A -> setGradient(new tensor(owner * temp));
+    else A -> setGradient(std::make_shared<tensor<t>>(owner * temp));
     A -> requiresGrad(true);
     owner.requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -392,10 +417,11 @@ void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
     }
     
     if (A-> gradient()) *A-> gradient() += *owner.gradient() * temp;
-    else A-> setGradient(new tensor(*owner.gradient() * temp));
+    else A-> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * temp));
     A-> requiresGrad(true);
 
     if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -403,15 +429,16 @@ void batchNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
     if (!axis) {    
         if (A -> gradient()) *A -> gradient() += owner.gradient()->colSum();
-        else A -> setGradient(new tensor(owner.gradient()->colSum()));
+        else A -> setGradient(std::make_shared<tensor<t>>(owner.gradient()->colSum()));
     }
     else {
         if (A -> gradient()) *A -> gradient() += owner.gradient()->rowSum();
-        else A -> setGradient(new tensor(owner.gradient()->rowSum()));
+        else A -> setGradient(std::make_shared<tensor<t>>(owner.gradient()->rowSum()));
     }
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -421,16 +448,17 @@ void layerNormNode<t>::backward(const tensor<t>& owner) {
     gamma->requiresGrad(false);
     beta->requiresGrad(false);
     if (beta-> gradient()) *beta-> gradient() += owner.gradient()->colSum();
-    else beta-> setGradient(new tensor(owner.gradient()->colSum()));
+    else beta-> setGradient(std::make_shared<tensor<t>>(owner.gradient()->colSum()));
     if (gamma-> gradient()) *gamma-> gradient() += (*owner.gradient() * (*norm.get())).colSum();
-    else gamma-> setGradient(new tensor((*owner.gradient() * (*norm.get())).colSum()));
+    else gamma-> setGradient(std::make_shared<tensor<t>>((*owner.gradient() * (*norm.get())).colSum()));
     if (input-> gradient()) *input-> gradient() += (gamma->batch(inv->getShape()[0]) * (*inv.get()))*(*owner.gradient() - (owner.gradient()->rowSum()/owner.gradient()->getShape()[1]).batch(owner.gradient()->getShape()[1], 1) - (*norm.get()) * ((*owner.gradient() * (*norm.get())).rowSum()/owner.gradient()->getShape()[1]).batch(norm->getShape()[1], 1));
-    else input-> setGradient(new tensor(((gamma->batch(inv->getShape()[0]) * (*inv.get()))*(*owner.gradient() - (owner.gradient()->rowSum()/owner.gradient()->getShape()[1]).batch(owner.gradient()->getShape()[1], 1) - (*norm.get()) * ((*owner.gradient() * (*norm.get())).rowSum()/owner.gradient()->getShape()[1]).batch(norm->getShape()[1], 1)))));
+    else input-> setGradient(std::make_shared<tensor<t>>(((gamma->batch(inv->getShape()[0]) * (*inv.get()))*(*owner.gradient() - (owner.gradient()->rowSum()/owner.gradient()->getShape()[1]).batch(owner.gradient()->getShape()[1], 1) - (*norm.get()) * ((*owner.gradient() * (*norm.get())).rowSum()/owner.gradient()->getShape()[1]).batch(norm->getShape()[1], 1)))));
     input -> requiresGrad(true);
     gamma -> requiresGrad(true);
     beta -> requiresGrad(true);
 
     if (input-> gradientFunction()) input-> gradientFunction() -> backward(*input.get());
+    input -> clearGradientFunction();
 }
 
 template <typename t>
@@ -447,7 +475,7 @@ template <typename t>
 void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
     weight->requiresGrad(false);
     if (!weight->gradient()) {
-        weight->setGradient(new tensor<t>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
+        weight->setGradient(std::make_shared<tensor<t>>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
         weight->gradient()->zeros();
     }
     size_t* temp;
@@ -475,6 +503,7 @@ void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
     weight -> requiresGrad(true);
 
     if (weight -> gradientFunction()) weight -> gradientFunction() -> backward(*weight.get());
+    weight -> clearGradientFunction();
 }
 
 template <typename t>
@@ -490,7 +519,7 @@ template <typename t>
 void positionEmbeddingNode<t>::backward(const tensor<t>& owner) {
     weight->requiresGrad(false);
     if (!weight->gradient()) {
-        weight->setGradient(new tensor<t>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
+        weight->setGradient(std::make_shared<tensor<t>>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
         weight->gradient()->zeros();
     }
     positionEmbeddingNodeKernel<<<cuda::ceil_div(owner.gradient()->numElements(), 256), 256>>>(weight->gradient()->data(), owner.gradient()->data(), owner.gradient()->numElements());
@@ -503,6 +532,7 @@ void positionEmbeddingNode<t>::backward(const tensor<t>& owner) {
     weight -> requiresGrad(true);
 
     if (weight -> gradientFunction()) weight -> gradientFunction() -> backward(*weight.get());
+    weight -> clearGradientFunction();
 }
 
 template <typename t>
@@ -514,9 +544,9 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
     wVal->requiresGrad(false);
     auto dV = score->transposed().matMul(*owner.gradient());
     if (score-> gradient()) *score-> gradient() += owner.gradient()->matMul(V->transposed());
-    else score-> setGradient(new tensor(owner.gradient()->matMul(V->transposed())));
+    else score-> setGradient(std::make_shared<tensor<t>>(owner.gradient()->matMul(V->transposed())));
     if (wVal-> gradient()) *wVal-> gradient() += input->transposed().matMul(dV);
-    else wVal-> setGradient(new tensor(input->transposed().matMul(dV)));
+    else wVal-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dV)));
     tensor<t> tempSoftGrad(device::GPU, score->getShape()[0], score->getShape()[1]);
     softmaxNode<t> temp(&tempSoftGrad);
     temp.backward(*score.get());
@@ -526,15 +556,16 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
     auto dQ = softmaxGrad.matMul(*K.get());
     auto dK = softmaxGrad.transposed().matMul(*Q.get());
     if (wKey-> gradient()) *wKey-> gradient() += input->transposed().matMul(dK);
-    else wKey-> setGradient(new tensor(input->transposed().matMul(dK)));
+    else wKey-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dK)));
     if (wQuery-> gradient()) *wQuery-> gradient() += input->transposed().matMul(dQ);
-    else wQuery-> setGradient(new tensor(input->transposed().matMul(dQ)));
+    else wQuery-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dQ)));
     if (input-> gradient()) *input-> gradient() += dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed());
-    else input-> setGradient(new tensor(dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed())));
+    else input-> setGradient(std::make_shared<tensor<t>>(dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed())));
     wQuery->requiresGrad(true);
     wKey->requiresGrad(true);
     wVal->requiresGrad(true);
     input->requiresGrad(true);
     score->clearGrad();
     if (input -> gradientFunction()) input -> gradientFunction() -> backward(*input.get());
+    input -> clearGradientFunction();
 }

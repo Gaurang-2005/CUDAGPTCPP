@@ -309,40 +309,41 @@ public:
 };
 
 template <typename t>
-class sequential : public module<t> {
+class sequential {
     std::vector<std::unique_ptr<module<t>>> modules; 
+    std::vector<tensor<t>> outs;
 public:
     template <typename...Args>
     requires (std::derived_from<std::decay_t<Args>, module<t>> && ...)
     sequential(Args&&...args) {
+        outs.reserve(sizeof...(args));
+        modules.reserve(sizeof...(args));
         (
             modules.push_back(std::make_unique<std::decay_t<Args>>(std::forward<Args>(args))),
             ...
         );
     }
 
-    tensor<t> forward(const tensor<t>& input) override {
-        tensor<t> temp = input;
-        for (auto& i : modules) {
-            tensor<t> temp2 = i -> forward(std::move(temp));
-            tensor<t> tempdel = std::move(temp);
-            temp = temp2;
+    tensor<t>& forward(const tensor<t>& input) {
+        outs.clear();
+        outs.push_back(modules[0] -> forward(input));
+        for (int i = 1; i < modules.size(); i++) {
+            outs.push_back(modules[i] -> forward(outs[i - 1]));
         }
 
-        return temp;
+        return outs.back();
     }
 
-    tensor<t> forward(tensor<t>&& input) override {
-        tensor<t> temp = std::move(input);
-        for (auto& i : modules) {
-            tensor<t> temp2 = i -> forward(std::move(temp));
-            tensor<t> tempdel = std::move(temp);
-            temp = temp2;
+    tensor<t>& forward(tensor<t>&& input) {
+        outs.clear();
+        outs.push_back(modules[0] -> forward(std::move(input)));
+        for (int i = 1; i < modules.size(); i++) {
+            outs.push_back(modules[i] -> forward(outs[i - 1]));
         }
 
-        return temp;
+        return outs.back();
     }
-    std::vector<tensor<t>*> parameters() override {
+    std::vector<tensor<t>*> parameters() {
         std::vector<tensor<t>*> out;
 
         for (auto& i : modules) {

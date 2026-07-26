@@ -1,6 +1,5 @@
 #include "tensor/tensor.hpp"
 #include <cuda_runtime.h>
-#include <iostream>
 #include <cuda/cmath>
 #include <curand_kernel.h>
 
@@ -60,13 +59,14 @@ tensor<t>::~tensor() {
     else if (dev == device::CPU) {
         delete[] tens;
     }
-    if (refCount) (*refCount)--;
-    if (grad && !refCount || grad && *refCount == 0) delete grad;
-    if (refCount && *refCount == 0) delete refCount;
+    tensorsDestroyed++;
+    // std::cout << "Created: " << tensorsCreated
+    //           << " Destroyed: " << tensorsDestroyed << '\n';
+    if (debugTensorDeath) std::cout<<"tensor killed with debugID: "<<debugID<<std::endl;
 }
 
 template <typename t>
-tensor<t>::tensor(device dev, std::initializer_list<std::initializer_list<t>> list) : dev(dev) {
+tensor<t>::tensor(device dev, std::initializer_list<std::initializer_list<t>> list) : dev(dev), debugID(++id) {
     shape.push_back(list.size());
     shape.push_back(list.begin()->size());
     for (auto& i : shape) {
@@ -100,11 +100,15 @@ tensor<t>::tensor(device dev, std::initializer_list<std::initializer_list<t>> li
         delete[] tens;
         tens = temp;
     }
-    refCount = new int(1);
+
+    tensorsCreated++;
+    // std::cout << "Created: " << tensorsCreated
+    //           << " Destroyed: " << tensorsDestroyed << '\n';  
+    addDebugId();
 }
 
 template <typename t>
-tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other.storageLength), dev(other.dev) {
+tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other.storageLength), dev(other.dev), debugID(++id) {
     if (dev == device::CPU) {
         tens = new t[storageLength];
         std::copy(other.tens, other.tens + storageLength, tens);
@@ -124,15 +128,16 @@ tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other
         }
     }
     isGradEnabled = other.isGradEnabled;
-    grad = nullptr;
     if (other.grad) grad = other.grad;
     gradFunction = other.gradFunction;
-    refCount = other.refCount;
-    (*refCount)++;
+    tensorsCreated++;
+    // std::cout << "Created: " << tensorsCreated
+    //           << " Destroyed: " << tensorsDestroyed << '\n';   
+    addDebugId();
 }
 
 template <typename t>
-tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), storageLength(other.storageLength), tens(other.tens), dev(other.dev) {
+tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), storageLength(other.storageLength), tens(other.tens), dev(other.dev), debugID(++id) {
     other.tens = nullptr;
     other.storageLength = 0;
     isGradEnabled = other.isGradEnabled;
@@ -141,33 +146,30 @@ tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), stor
     other.isGradEnabled = false;
     other.grad = nullptr;
     other.gradFunction = nullptr;
-    refCount = other.refCount;
-    other.refCount = nullptr;
+
+    tensorsCreated++;
+    // std::cout << "Created: " << tensorsCreated
+    //           << " Destroyed: " << tensorsDestroyed << '\n';    
+    addDebugId();
 }
 
 template <typename t>
 tensor<t>& tensor<t>::operator=(const tensor& other) {
     if (this != &other) {
         if (dev == device::GPU) {
-            cudaFree(tens);
+            if (tens) cudaFree(tens);
             tens = nullptr;
         }
         else if (dev == device::CPU) {
-            delete[] tens;
+            if (tens) delete[] tens;
             tens = nullptr;
         }
         shape = other.shape;
         storageLength = other.storageLength;
         dev = other.dev;
         isGradEnabled = other.isGradEnabled;
-        (*refCount)--;
-        if (grad && !(*refCount)) delete grad;
         grad = nullptr;
         if (other.grad) grad = other.grad;
-        if (!(*refCount)) delete refCount;
-        refCount = nullptr;
-        refCount = other.refCount;
-        (*refCount)++;
         gradFunction = other.gradFunction;
         if (dev == device::CPU) {
             tens = new t[storageLength];
@@ -191,15 +193,13 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
     if (gradFunction || other.gradFunction) throw std::logic_error("Move Assignment of tensors participating in an autograd graph is not supported.");
     if (this != &other) {
         if (dev == device::GPU) {
-            cudaFree(tens);
+            if (tens) cudaFree(tens);
             tens = nullptr;
         }
         else if (dev == device::CPU) {
-            delete[] tens;
+            if (tens) delete[] tens;
             tens = nullptr;
         }
-        (*refCount)--;
-        if (grad && !(*refCount)) delete grad;
         grad = nullptr;
         shape = std::move(other.shape);
         storageLength = other.storageLength;
@@ -213,10 +213,6 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
         other.isGradEnabled = false;
         other.grad = nullptr;
         other.gradFunction = nullptr;
-        if (refCount && !(*refCount)) delete refCount;
-        refCount = nullptr;
-        refCount = other.refCount;
-        other.refCount = nullptr;
     }
     return *this;
 }
@@ -252,7 +248,7 @@ __global__ void randomKernel(size_t storageLength, t* tens) {
     if (idx < storageLength) {
         curandState state;
         curand_init(clock64(), idx, 0, &state);
-        tens[idx] = 2 * curand_uniform(&state) - 1;
+        tens[idx] = (2 * curand_uniform(&state) - 1)/10;
     }
 }
 
@@ -523,6 +519,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) const & {
         other.toGPU();
     }
     tensor<t> temp(*this);
+    temp.gradFunction = nullptr;
     multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -548,6 +545,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) && {
         other.toGPU();
     }
     tensor<t> temp(*this);
+    temp.gradFunction = nullptr;
     multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -574,6 +572,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) const & {
         other.toGPU();
     }
     tensor<t> temp(*this);
+    temp.gradFunction = nullptr;
     multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -600,6 +599,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) && {
         other.toGPU();
     }
     tensor<t> temp(*this);
+    temp.gradFunction = nullptr;
     multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -773,7 +773,7 @@ void tensor<t>::print() const {
     }
     std::cout << "), device: " << (dev == device::CPU ? "CPU" : "GPU") << std::endl;
     for (size_t i = 0; i < storageLength; ++i) {
-        if (!(i % shape[1])) std::cout << std::endl;
+        if (!(i % shape[1])) std::cout << '\n';
         std::cout << tempData[i] << " ";
     }
     std::cout << std::endl << std::endl;

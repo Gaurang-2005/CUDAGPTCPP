@@ -203,7 +203,7 @@ public:
     geluNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
 };
-
+#include <iostream>
 template<typename t>
 class softmaxNode : public node<t> {
     const tensorRef<t> A;

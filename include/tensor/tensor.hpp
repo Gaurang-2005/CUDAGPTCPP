@@ -4,11 +4,18 @@
 #include <concepts>
 #include <cassert>
 #include "autograd/node.hpp"
+#include <iostream>
 
 enum class device {
     CPU,
     GPU
 };
+
+#include <atomic>
+inline std::atomic<size_t> tensorsCreated = 0;
+inline std::atomic<size_t> tensorsDestroyed = 0;
+inline bool debugTensorDeath = false;
+inline std::atomic<size_t> id = 0;
 
 template <typename t>
 class tensor {
@@ -18,13 +25,13 @@ class tensor {
     mutable device dev;
     mutable bool isGradEnabled = false;
     mutable std::shared_ptr<node<t>> gradFunction = nullptr;
-    mutable tensor* grad = nullptr;
+    mutable std::shared_ptr<tensor<t>> grad = nullptr;
     bool isIdentity = false;
-    int* refCount;
+    size_t debugID;
 public:
     template <typename ... Args>
     requires (std::integral<Args> && ...)
-    tensor(device dev, Args...args) : shape({static_cast<size_t>(args)...}), dev(dev) {
+    tensor(device dev, Args...args) : shape({static_cast<size_t>(args)...}), dev(dev), debugID(++id) {
 
         for (auto& i : shape) {
             storageLength*=i;
@@ -35,9 +42,15 @@ public:
         else if (dev == device::GPU) {
             constructorAllocate();
         }
-        refCount = new int(1);
+        tensorsCreated++;
+        addDebugId();
+        // std::cout << "Created: " << tensorsCreated
+        //         << " Destroyed: " << tensorsDestroyed << '\n';
     }
-
+    void addDebugId() {
+        // if (debugID == 28) std::abort();
+        if (debugTensorDeath) std::cout<<"tensor created with debugID: "<<debugID<<std::endl;
+    }
     tensor(device dev, std::initializer_list<std::initializer_list<t>> list);
 
     template <typename ... Args>
@@ -47,22 +60,25 @@ public:
     t* data() {
         return tens;
     }
-    tensor*& gradient() {
+    std::shared_ptr<tensor<t>>& gradient() {
         return grad;
     }
-    tensor* gradient() const {
+    std::shared_ptr<tensor<t>> gradient() const {
         return grad;
     }
     const t* data() const {
         return tens;
     }
-    std::shared_ptr<node<t>> gradientFunction() {
+    std::shared_ptr<node<t>>& gradientFunction() {
         return gradFunction;
     }
-    const std::shared_ptr<node<t>> gradientFunction() const {
+    const std::shared_ptr<node<t>>& gradientFunction() const {
         return gradFunction;
     }
-    void setGradient(tensor<t>* gradient) const {
+    void clearGradientFunction() const {
+        gradFunction.reset();
+    }
+    void setGradient(std::shared_ptr<tensor<t>> gradient) const {
         grad = gradient;
     }
     void setGradientFunction(std::shared_ptr<node<t>> gradFunction) const {
@@ -270,13 +286,12 @@ public:
     void backward() {
         if (!isGradEnabled) throw std::invalid_argument("Gradient is not enabled on this tensor, so backward failed!");
 
-        if (grad) {
-            delete grad;
-        }
-        grad = new tensor(device::GPU, gradFunction -> shape()[0], gradFunction -> shape()[1]);
+
+        grad = std::make_shared<tensor<t>>(device::GPU, gradFunction -> shape()[0], gradFunction -> shape()[1]);
         grad->ones();
 
         if (gradFunction) gradFunction -> backward(*this);
+        clearGradientFunction();
     }
 
     tensor operator-() const;
@@ -308,7 +323,6 @@ public:
     tensor softmax() &&;
 
     void clearGrad() const {
-        if (grad) delete grad;
         grad = nullptr;
     }
 

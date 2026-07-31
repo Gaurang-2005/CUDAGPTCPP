@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <memory>
+#include "tokenizer/types.hpp"
 
 template <typename t>
 class tensor;
@@ -252,11 +253,10 @@ public:
 template<typename t>
 class tokenEmbeddingNode : public node<t> {
     const tensorRef<t> weight;
-    const size_t* tokenIds;
-    const size_t len;
+    const std::vector<TokenID> tokenIds;
 public:
     std::vector<size_t> shape() override {return weight->getShape();}
-    tokenEmbeddingNode(const tensor<t>* A, const size_t* tokenIds, const size_t len) : weight(A), tokenIds(tokenIds), len(len) {}
+    tokenEmbeddingNode(const tensor<t>* A, const std::vector<TokenID>& tokenIds) : weight(A), tokenIds(tokenIds) {}
     virtual void backward(const tensor<t>& owner) override;
 };
 
@@ -284,5 +284,15 @@ public:
     std::vector<size_t> shape() override {return input->getShape();}
     singleHeadAttentionNode(const std::shared_ptr<tensor<t>> Q, const std::shared_ptr<tensor<t>> K, const std::shared_ptr<tensor<t>> V, const tensor<t>* input, const tensor<t>* wQuery, const tensor<t>* wKey, const tensor<t>* wVal, const std::shared_ptr<tensor<t>> score) : Q(Q),  K(K), V(V), input(input), wQuery(wQuery), wKey(wKey), wVal(wVal), score(score) {}
     singleHeadAttentionNode(const std::shared_ptr<tensor<t>> Q, const std::shared_ptr<tensor<t>> K, const std::shared_ptr<tensor<t>> V, const std::shared_ptr<tensor<t>> input, const tensor<t>* wQuery, const tensor<t>* wKey, const tensor<t>* wVal, const std::shared_ptr<tensor<t>> score) : Q(Q),  K(K), V(V), input(input), wQuery(wQuery), wKey(wKey), wVal(wVal), score(score) {}
+    virtual void backward(const tensor<t>& owner) override;
+};
+
+template<typename t>
+class gatherNode : public node<t> {
+    const tensorRef<t> A;
+    const std::vector<TokenID>* B;
+public:
+    std::vector<size_t> shape() override {return A->getShape();}
+    gatherNode(const tensor<t>* A, const std::vector<TokenID>* B) : A(A), B(B) {}
     virtual void backward(const tensor<t>& owner) override;
 };

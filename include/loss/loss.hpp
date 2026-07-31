@@ -2,6 +2,7 @@
 
 #include "tensor/tensor.hpp"
 #include "autograd/node.hpp"
+#include "tokenizer/types.hpp"
 
 template <typename t>
 tensor<t> MSE(const tensor<t>& prediction, const tensor<t>& target) {
@@ -24,6 +25,9 @@ tensor<t> crossEntropyLoss(const tensor<t>& prediction, const tensor<t>& target,
     }
     return (target * (-(prediction + tolerance).log())).rowSum().mean();
 }
+
+template <typename t>
+tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<TokenID>& target);
 
 template <typename t>
 tensor<t> crossEntropyLoss(const tensor<t>& prediction, const tensor<t>&& target) = delete;

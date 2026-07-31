@@ -73,6 +73,9 @@ template class positionEmbeddingNode<double>;
 template class singleHeadAttentionNode<float>;
 template class singleHeadAttentionNode<double>;
 
+template class gatherNode<float>;
+template class gatherNode<double>;
+
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
@@ -462,7 +465,7 @@ void layerNormNode<t>::backward(const tensor<t>& owner) {
 }
 
 template <typename t>
-__global__ void tokenEmbeddingNodeKernel(t* grad, const t* outGrad, const size_t* token, const size_t len, const size_t dim) {
+__global__ void tokenEmbeddingNodeKernel(t* grad, const t* outGrad, const TokenID* token, const size_t len, const size_t dim) {
     size_t tokenIdx = threadIdx.x + blockDim.x * blockIdx.x;
     size_t dimIdx = threadIdx.y + blockDim.y * blockIdx.y;
     
@@ -473,24 +476,28 @@ __global__ void tokenEmbeddingNodeKernel(t* grad, const t* outGrad, const size_t
 
 template <typename t>
 void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
+    size_t len = tokenIds.size();
+    TokenID* tokenIdsCpy = new TokenID[len];
+    for (int i = 0; i < len; i++) tokenIdsCpy[i] = tokenIds[i];
     weight->requiresGrad(false);
     if (!weight->gradient()) {
         weight->setGradient(std::make_shared<tensor<t>>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
         weight->gradient()->zeros();
     }
-    size_t* temp;
-    cudaError_t err = cudaMalloc(&temp, len * sizeof(size_t));
+    TokenID* temp;
+    cudaError_t err = cudaMalloc(&temp, len * sizeof(TokenID));
     if (err != cudaSuccess) {
         std::cerr << "cudaMalloc failed: "
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    err = cudaMemcpy(temp, tokenIds, len * sizeof(size_t), cudaMemcpyDefault);
+    err = cudaMemcpy(temp, tokenIdsCpy, len * sizeof(TokenID), cudaMemcpyDefault);
     if (err != cudaSuccess) {
         std::cerr << "cudaMemcpy failed: "
                 << cudaGetErrorString(err)
                 << '\n';
-    }    
+    } 
+    delete[] tokenIdsCpy;  
     tokenEmbeddingNodeKernel<<<dim3(cuda::ceil_div(len, 16),cuda::ceil_div(weight->getShape()[1], 16)), dim3(16, 16)>>>(weight->gradient()->data(), owner.gradient()->data(), temp, len, weight->getShape()[1]);
     cudaDeviceSynchronize();
     err = cudaGetLastError();
@@ -568,4 +575,49 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
     score->clearGrad();
     if (input -> gradientFunction()) input -> gradientFunction() -> backward(*input.get());
     input -> clearGradientFunction();
+}
+
+template <typename t>
+__global__ void scatterKernel(t* grad, const t* ownerGrad, const TokenID* targ, const size_t targLength, const size_t vocabLen) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx >= targLength) return;
+
+    grad[idx * vocabLen + targ[idx]] = ownerGrad[idx];
+}
+
+template <typename t>
+void gatherNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient() -> requiresGrad(false);
+    A->requiresGrad(false);
+    tensor<t> grad(device::GPU, A->getShape()[0], A->getShape()[1]);
+    grad.zeros();
+    TokenID* temp;
+    cudaError_t err = cudaMalloc(&temp, B->size() * sizeof(TokenID));
+    if (err != cudaSuccess) {
+        std::cerr << "cudaMalloc failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    err = cudaMemcpy(temp, B->data(), B->size() * sizeof(TokenID), cudaMemcpyDefault);
+    if (err != cudaSuccess) {
+        std::cerr << "cudaMemcpy failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    owner.gradient()->toGPU();
+    scatterKernel<<<cuda::ceil_div(B->size(), 256), 256>>>(grad.data(), owner.gradient()->data(), temp, B->size(), grad.getShape()[1]);
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+    }
+    cudaFree(temp);
+    if (A-> gradient()) *A-> gradient() += grad;
+    else A-> setGradient(std::make_shared<tensor<t>>(grad));
+    A-> requiresGrad(true);
+
+    if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
 }

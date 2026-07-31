@@ -12,7 +12,7 @@ template class singleHeadAttention<float>;
 template class singleHeadAttention<double>;
 
 template <typename t>
-__global__ void tokenEmbeddingKernel(t* output, const size_t* input, const t* weight, const size_t dim, const size_t storageLength) {
+__global__ void tokenEmbeddingKernel(t* output, const TokenID* input, const t* weight, const size_t dim, const size_t storageLength) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (idx >= storageLength) return;
@@ -24,21 +24,25 @@ __global__ void tokenEmbeddingKernel(t* output, const size_t* input, const t* we
 }
 
 template <typename t>
-tensor<t> tokenEmbedding<t>::forward(const size_t* input, size_t len) {
+tensor<t> tokenEmbedding<t>::forward(const std::vector<TokenID>& input) {
+    size_t len = input.size();
+    TokenID* inputCpy = new TokenID[len];
+    for (int i = 0; i < len; i++) inputCpy[i] = input[i];
     tensor<t> out(device::GPU, len, weight.getShape()[1]);
-    size_t* temp;
-    cudaError_t err = cudaMalloc(&temp, len * sizeof(size_t));
+    TokenID* temp;
+    cudaError_t err = cudaMalloc(&temp, len * sizeof(TokenID));
     if (err != cudaSuccess) {
         std::cerr << "cudaMalloc failed: "
                 << cudaGetErrorString(err)
                 << '\n';
     }
-    err = cudaMemcpy(temp, input, len * sizeof(size_t), cudaMemcpyDefault);
+    err = cudaMemcpy(temp, inputCpy, len * sizeof(TokenID), cudaMemcpyDefault);
     if (err != cudaSuccess) {
         std::cerr << "cudaMemcpy failed: "
                 << cudaGetErrorString(err)
                 << '\n';
     }
+    delete[] inputCpy;
     tokenEmbeddingKernel<<<cuda::ceil_div(out.numElements(), 256), 256>>>(out.data(), temp, weight.data(), weight.getShape()[1], out.numElements());
     cudaDeviceSynchronize();
     err = cudaGetLastError();
@@ -49,7 +53,7 @@ tensor<t> tokenEmbedding<t>::forward(const size_t* input, size_t len) {
     }
     cudaFree(temp);
     out.requiresGrad(true);
-    out.setGradientFunction(std::make_shared<tokenEmbeddingNode<t>>(&weight, input, len));
+    out.setGradientFunction(std::make_shared<tokenEmbeddingNode<t>>(&weight, input));
     return out;
 }
 
@@ -64,7 +68,7 @@ __global__ void positionEmbeddingKernel(t* output, const t* weight, const size_t
 
 template <typename t>
 tensor<t> positionEmbedding<t>::forward(size_t len) {
-    if (len >= weight.getShape()[0]) throw std::invalid_argument("Input sequence is longer than the maximum supported sequence length.");
+    if (len > weight.getShape()[0]) throw std::invalid_argument("Input sequence is longer than the maximum supported sequence length.");
     tensor<t> out(device::GPU, len, weight.getShape()[1]);
     positionEmbeddingKernel<<<cuda::ceil_div(out.numElements(), 256), 256>>>(out.data(), weight.data(), out.numElements());
     cudaError_t err = cudaDeviceSynchronize();

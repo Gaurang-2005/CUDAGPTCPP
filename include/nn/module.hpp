@@ -1,7 +1,7 @@
 #pragma once
 
 #include "tensor/tensor.hpp"
-#include <thread>
+#include "tokenizer/types.hpp"
 
 template <typename t>
 class module {
@@ -161,7 +161,7 @@ public:
         weight.random();
         weight.requiresGrad(true);
     }  
-    tensor<t> forward(const size_t* input, size_t len);
+    tensor<t> forward(const std::vector<TokenID>& input);
     tensor<t>* parameters() {
         return &weight;
     }

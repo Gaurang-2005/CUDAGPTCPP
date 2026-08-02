@@ -307,9 +307,9 @@ int main() {
     // auto trainInput = tokenizer.encode(trainText);
     std::cout << "Encoded token count = " << trainInput.size() << '\n';
     GPT<float> model(device::GPU, 26, context, 128, 1);
-    SGD<float> opti(model.parameters(), 0.0001); 
+    Adam<float> opti(model.parameters(), 0.0001); 
     int trainLen = context;
-    for (int epoch = 0; epoch < 1000; epoch++) {
+    for (int epoch = 0; epoch < 100; epoch++) {
         std::cout << "epoch: " << epoch << '\n';
         for (int i = trainLen; i < trainInput.size() - 1; i++) {
             auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
@@ -322,7 +322,7 @@ int main() {
                 // out.print();
                 loss.print();
             }
-            if (epoch == 600) opti.setLearningrate(1e-5);
+            // if (epoch == 600) opti.setLearningrate(1e-5);
                 
             loss.backward();
             // std::cout << "backward passed\n";
@@ -344,7 +344,10 @@ int main() {
         auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
         std::cout << "Input: " << intToString(dataset) << '\n';
         auto logits = model.forward(dataset);
-        logits.print();
         std::cout << "Pred: " << intToString(logits.argMax()) << "\n\n";
     }
+    auto dataset = std::vector<TokenID>(trainInput.begin(), trainInput.begin() + 1);
+    std::cout << "Input: " << intToString(dataset) << '\n';
+    auto logits = model.forward(dataset);
+    std::cout << "Pred: " << intToString(logits.argMax()) << "\n\n";
 }

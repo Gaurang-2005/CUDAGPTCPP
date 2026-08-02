@@ -279,6 +279,7 @@ void reluNode<t>::backward(const tensor<t>& owner) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * temp;
@@ -348,6 +349,7 @@ void geluNode<t>::backward(const tensor<t>& owner) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * temp;
@@ -386,6 +388,7 @@ void softmaxNode<t>::backward(const tensor<t>& owner) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (A -> gradient()) *A -> gradient() += owner * temp;
     else A -> setGradient(std::make_shared<tensor<t>>(owner * temp));
@@ -417,6 +420,7 @@ void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     
     if (A-> gradient()) *A-> gradient() += *owner.gradient() * temp;
@@ -490,12 +494,14 @@ void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
         std::cerr << "cudaMalloc failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     err = cudaMemcpy(temp, tokenIdsCpy, len * sizeof(TokenID), cudaMemcpyDefault);
     if (err != cudaSuccess) {
         std::cerr << "cudaMemcpy failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     } 
     delete[] tokenIdsCpy;  
     tokenEmbeddingNodeKernel<<<dim3(cuda::ceil_div(len, 16),cuda::ceil_div(weight->getShape()[1], 16)), dim3(16, 16)>>>(weight->gradient()->data(), owner.gradient()->data(), temp, len, weight->getShape()[1]);
@@ -505,6 +511,7 @@ void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     cudaFree(temp);
     weight -> requiresGrad(true);
@@ -535,6 +542,7 @@ void positionEmbeddingNode<t>::backward(const tensor<t>& owner) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     weight -> requiresGrad(true);
 
@@ -598,12 +606,14 @@ void gatherNode<t>::backward(const tensor<t>& owner) {
         std::cerr << "cudaMalloc failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     err = cudaMemcpy(temp, B->data(), B->size() * sizeof(TokenID), cudaMemcpyDefault);
     if (err != cudaSuccess) {
         std::cerr << "cudaMemcpy failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     owner.gradient()->toGPU();
     scatterKernel<<<cuda::ceil_div(B->size(), 256), 256>>>(grad.data(), owner.gradient()->data(), temp, B->size(), grad.getShape()[1]);
@@ -612,6 +622,7 @@ void gatherNode<t>::backward(const tensor<t>& owner) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     cudaFree(temp);
     if (A-> gradient()) *A-> gradient() += grad;

@@ -15,6 +15,7 @@ void tensor<t>::constructorAllocate() {
         std::cerr << "cudaMalloc failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 }
 
@@ -30,6 +31,7 @@ void tensor<t>::toGPU() const {
         std::cerr << "cudaMalloc failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (tens) {
         cudaMemcpy(tempgpuData, tens, storageLength * sizeof(t), cudaMemcpyHostToDevice);
@@ -90,12 +92,14 @@ tensor<t>::tensor(device dev, std::initializer_list<std::initializer_list<t>> li
             std::cerr << "cudaMalloc failed: "
                     << cudaGetErrorString(err)
                     << '\n';
+            std::abort();
         }
         err = cudaMemcpy(temp, tens, storageLength * sizeof(t), cudaMemcpyDefault);
         if (err != cudaSuccess) {
             std::cerr << "cudaMemcpy failed: "
                     << cudaGetErrorString(err)
                     << '\n';
+            std::abort();
         }
         delete[] tens;
         tens = temp;
@@ -119,12 +123,14 @@ tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other
             std::cerr << "cudaMalloc failed: "
                     << cudaGetErrorString(err)
                     << '\n';
+            std::abort();
         }
         err = cudaMemcpy(tens, other.tens, storageLength * sizeof(t), cudaMemcpyDefault);
         if (err != cudaSuccess) {
             std::cerr << "cudaMemcpy failed: "
                     << cudaGetErrorString(err)
                     << '\n';
+            std::abort();
         }
     }
     isGradEnabled = other.isGradEnabled;
@@ -181,6 +187,7 @@ tensor<t>& tensor<t>::operator=(const tensor& other) {
                 std::cerr << "cudaMalloc failed: "
                         << cudaGetErrorString(err)
                         << '\n';
+                std::abort();
             }
             cudaMemcpy(tens, other.tens, storageLength * sizeof(t), cudaMemcpyDeviceToDevice);
         }
@@ -238,6 +245,7 @@ void tensor<t>::fill(t val) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 }
 
@@ -264,6 +272,7 @@ void tensor<t>::random() {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 }
 
@@ -302,6 +311,7 @@ tensor<t> tensor<t>::operator+(const tensor& other) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         temp.gradFunction = std::make_shared<addNode<t>>(this, &other);
@@ -325,6 +335,7 @@ tensor<t> tensor<t>::operator+(const tensor<t>& other) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -349,6 +360,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -373,6 +385,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -406,6 +419,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         temp.gradFunction = std::make_shared<subtractNode<t>>(this, &other);
@@ -431,6 +445,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -457,6 +472,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -483,6 +499,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -527,6 +544,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         temp.gradFunction = std::make_shared<multiplyNode<t>>(this, &other);
@@ -553,6 +571,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -580,6 +599,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -607,6 +627,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -650,6 +671,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         temp.gradFunction = std::make_shared<divideNode<t>>(this, &other);
@@ -675,6 +697,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -701,6 +724,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -727,6 +751,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -758,7 +783,7 @@ void tensor<t>::print() const {
             std::cerr << "Memory copy failed: "
                     << cudaGetErrorString(err)
                     << '\n';
-            return;
+            std::abort();
         }
     }
     else {
@@ -809,6 +834,7 @@ tensor<t> tensor<t>::transposed() const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled) {
         temp.gradFunction = std::make_shared<transposeNode<t>>(this);
@@ -833,6 +859,7 @@ tensor<t> tensor<t>::transposed() && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -907,6 +934,7 @@ tensor<t> tensor<t>::matMul(const tensor<t>& other) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         out.gradFunction = std::make_shared<matMulNode<t>>(this, &other);
@@ -941,6 +969,7 @@ tensor<t> tensor<t>::matMul(const tensor<t>& other) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -976,6 +1005,7 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -1011,6 +1041,7 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled || other.isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -1054,6 +1085,7 @@ tensor<t> tensor<t>::sum() const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     } 
     out.tens[0] = 0;
     for (int i = 0; i < blocks; i++) {
@@ -1082,6 +1114,7 @@ tensor<t> tensor<t>::sum() && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     } 
     out.tens[0] = 0;
     for (int i = 0; i < blocks; i++) {
@@ -1120,6 +1153,7 @@ void tensor<t>::identity() {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 }
 
@@ -1144,6 +1178,7 @@ tensor<t> tensor<t>::operator-() const {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     return temp;
 }
@@ -1167,6 +1202,7 @@ tensor<t> tensor<t>::exp() const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1187,6 +1223,7 @@ tensor<t> tensor<t>::exp() && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1218,6 +1255,7 @@ tensor<t> tensor<t>::pow(t power) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1239,6 +1277,7 @@ tensor<t> tensor<t>::pow(t power) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1269,6 +1308,7 @@ tensor<t> tensor<t>::log() const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1289,6 +1329,7 @@ tensor<t> tensor<t>::log() && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1319,6 +1360,7 @@ tensor<t> tensor<t>::operator*(t val) const {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     return out;
@@ -1343,6 +1385,7 @@ tensor<t> tensor<t>::operator/(t val) const {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     return out;
@@ -1369,6 +1412,7 @@ tensor<t> tensor<t>::ReLU() const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1391,6 +1435,7 @@ tensor<t> tensor<t>::ReLU() && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1423,6 +1468,7 @@ tensor<t> tensor<t>::sigmoid() const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1445,6 +1491,7 @@ tensor<t> tensor<t>::sigmoid() && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1477,6 +1524,7 @@ tensor<t> tensor<t>::tanh() const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1499,6 +1547,7 @@ tensor<t> tensor<t>::tanh() && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1534,6 +1583,7 @@ tensor<t> tensor<t>::gelu() const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1556,6 +1606,7 @@ tensor<t> tensor<t>::gelu() && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     if (isGradEnabled) {
@@ -1600,6 +1651,7 @@ tensor<t> tensor<t>::rowSum() const {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     return out;
@@ -1636,6 +1688,7 @@ tensor<t> tensor<t>::colSum() const {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     return out;
@@ -1650,11 +1703,11 @@ __global__ void softmaxKernel(t* tens, t* sum, t* out, size_t row, size_t col) {
 }
 
 template <typename t>
-__global__ void rowMaxKernel(t* tens, t* out, size_t rows, size_t cols) {
+__global__ void rowMaxKernel(t* tens, t* out, size_t cols) {
     size_t row = blockIdx.x;
     size_t pos = row * cols;
     __shared__ t temp[256];
-    temp[threadIdx.x] = 0;
+    temp[threadIdx.x] = tens[pos];
     __syncthreads();
 
     for (int i = 0; i < cols; i++) {
@@ -1675,13 +1728,14 @@ tensor<t> tensor<t>::rowMax() const {
     toGPU();
 
     tensor<t> out(device::GPU, shape[0], 1);
-    rowMaxKernel<<<shape[0], 256>>>(tens, out.tens, shape[0], shape[1]);
+    rowMaxKernel<<<shape[0], 256>>>(tens, out.tens, shape[1]);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
 
     return out;
@@ -1728,6 +1782,7 @@ tensor<t> tensor<t>::softmax() const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled) {
         out.isGradEnabled = true;
@@ -1767,6 +1822,7 @@ tensor<t> tensor<t>::softmax() && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -1811,6 +1867,7 @@ tensor<t> tensor<t>::batch(size_t batchSize, int axis) const & {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled) {
         out.isGradEnabled = true;
@@ -1836,11 +1893,108 @@ tensor<t> tensor<t>::batch(size_t batchSize, int axis) && {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     if (isGradEnabled) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
         out.isGradEnabled = true;
         out.gradFunction = std::make_shared<batchNode<t>>(first, axis);
     }
+    return out;
+}
+
+template <typename t>
+__global__ void argMaxKernel(t* tens, TokenID* out, size_t cols) {
+    size_t row = blockIdx.x;
+    size_t pos = row * cols;
+    __shared__ TokenID temp[256];
+    temp[threadIdx.x] = 0;
+    __syncthreads();
+
+    for (int i = 0; i < cols; i++) {
+        if (threadIdx.x + blockDim.x * i >= cols) break;
+        if (tens[pos + temp[threadIdx.x]] < tens[pos + threadIdx.x + blockDim.x * i]) temp[threadIdx.x] = threadIdx.x + blockDim.x * i;
+    }
+    __syncthreads();
+    for (int i = 1; i < 256; i*=2) {
+        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256)) 
+        if (tens[pos + temp[threadIdx.x]] < tens[pos + temp[threadIdx.x + i]]) temp[threadIdx.x] = temp[threadIdx.x + i];
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) out[row] = temp[0];
+}
+
+template <typename t>
+std::vector<TokenID> tensor<t>::argMax() const {
+    toGPU();
+    std::vector<TokenID> out(shape[0]);
+    TokenID* GPUOut;
+    cudaMalloc(&GPUOut, shape[0] * sizeof(TokenID));
+    argMaxKernel<<<shape[0], 256>>>(tens, GPUOut, shape[1]);
+    cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+        std::abort();
+    }
+    err = cudaMemcpy(out.data(), GPUOut, shape[0] * sizeof(TokenID), cudaMemcpyDefault);
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+        std::abort();
+    }
+    cudaFree(GPUOut);
+    return out;
+}
+
+template <typename t>
+__global__ void digitAddKernel(t* out, t* in, size_t storageLength, t val) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = in[idx] + val;
+}
+
+template <typename t>
+tensor<t> tensor<t>::operator+(t val) const {
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+    digitAddKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+        std::abort();
+    }
+
+    return out;
+}
+
+template <typename t>
+__global__ void digitSubtractKernel(t* out, t* in, size_t storageLength, t val) {
+    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    if (idx >= storageLength) return;
+
+    out[idx] = in[idx] - val;
+}
+
+template <typename t>
+tensor<t> tensor<t>::operator-(t val) const {
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+    digitSubtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+        std::abort();
+    }
+
     return out;
 }

@@ -332,4 +332,8 @@ public:
     friend tensor operator*(t other, const tensor<t>& me) {
         return me * other;
     }
+
+    std::vector<TokenID> argMax() const;
+    tensor<t> operator+(t val) const;
+    tensor<t> operator-(t val) const;
 };

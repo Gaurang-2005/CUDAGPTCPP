@@ -35,12 +35,14 @@ tensor<t> tokenEmbedding<t>::forward(const std::vector<TokenID>& input) {
         std::cerr << "cudaMalloc failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     err = cudaMemcpy(temp, inputCpy, len * sizeof(TokenID), cudaMemcpyDefault);
     if (err != cudaSuccess) {
         std::cerr << "cudaMemcpy failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     delete[] inputCpy;
     tokenEmbeddingKernel<<<cuda::ceil_div(out.numElements(), 256), 256>>>(out.data(), temp, weight.data(), weight.getShape()[1], out.numElements());
@@ -50,6 +52,7 @@ tensor<t> tokenEmbedding<t>::forward(const std::vector<TokenID>& input) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     cudaFree(temp);
     out.requiresGrad(true);
@@ -76,6 +79,7 @@ tensor<t> positionEmbedding<t>::forward(size_t len) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     out.requiresGrad(true);
     out.setGradientFunction(std::make_shared<positionEmbeddingNode<t>>(&weight, len));
@@ -102,6 +106,7 @@ tensor<t> singleHeadAttention<t>::scaledDotProductAttention(const tensor<t>& Q, 
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }    
     score = std::make_shared<tensor<t>>(scores.softmax());
     return score->matMul(V);

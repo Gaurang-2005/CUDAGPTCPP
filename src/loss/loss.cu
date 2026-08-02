@@ -43,6 +43,7 @@ tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<TokenID>& 
         std::cerr << "cudaMemcpy failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     tensor<t> out(device::GPU, target.size(), 1);
     crossEntropyLossLLMKernel<<<(target.size() + 255) / 256, 256>>>(out.data(), logits.data(), temp, target.size(), logits.getShape()[1]);
@@ -51,6 +52,7 @@ tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<TokenID>& 
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
                 << '\n';
+        std::abort();
     }
     cudaFree(temp);
     out.requiresGrad(true);

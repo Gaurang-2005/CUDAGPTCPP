@@ -258,6 +258,7 @@ void run() {
 #include "tensor/tensor.hpp"
 #include "loss/loss.hpp"
 #include "tokenizer/tokenizer.hpp"
+#include "nn/optimizer.hpp"
 
 #include <fstream>
 #include <sstream>
@@ -277,22 +278,73 @@ std::string readDataset(const std::string& filename) {
     return buffer.str();
 }
 
+std::string intToString(std::vector<TokenID> dat) {
+    std::string out;
+    for (auto& i : dat) out.push_back(char(i + 'A'));
+
+    return out;
+}
+
 int main() {
-    std::string trainText = readDataset("datasets/tiny shakespeare/train.csv");
-
+    std::string trainText = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    std::cout<<trainText<<std::endl;
     std::cout << "size of dataset: "<< trainText.length() << '\n';
+    std::vector<TokenID> trainInput;
 
-    BPE tokenizer(1024);
+    for (auto i : trainText) trainInput.push_back((i) - 65);
+    for (auto& i : trainInput) std::cout << i <<' ';
+    std::cout << '\n';
+    // BPE<float> tokenizer(26);
     // std::vector<std::string> doc;
     // doc.push_back(trainText);
 
     // tokenizer.train(doc);
     // tokenizer.save("tokenizerSave/tinyShakespeare/token.bin");
-    tokenizer.load("tokenizerSave/tinyShakespeare/token.bin");
-
-    auto trainInput = tokenizer.encode(trainText);
-    GPT<float> model(device::GPU, 1024, 10240, 128, 4);
-
-    auto out = model.forward(trainInput);
-
+    // tokenizer.load("tokenizerSave/tinyShakespeare/token.bin");
+    std::cout<<"tokenizer ready!!\n";
+    std::cout<<"encoded input ready!!\n";
+    int context = 8;
+    // auto trainInput = tokenizer.encode(trainText);
+    std::cout << "Encoded token count = " << trainInput.size() << '\n';
+    GPT<float> model(device::GPU, 26, context, 128, 1);
+    SGD<float> opti(model.parameters(), 0.0001); 
+    int trainLen = context;
+    for (int epoch = 0; epoch < 1000; epoch++) {
+        std::cout << "epoch: " << epoch << '\n';
+        for (int i = trainLen; i < trainInput.size() - 1; i++) {
+            auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
+            auto target = std::vector<TokenID>(trainInput.begin() + i - trainLen + 1, trainInput.begin() + i + 1);
+            auto out = model.forward(dataset);
+            // std::cout << "forward passed\n";
+            auto loss = crossEntropyLoss(out, target);
+            // std::cout << "loss passed\n";
+            if (i == 24) {
+                // out.print();
+                loss.print();
+            }
+            if (epoch == 600) opti.setLearningrate(1e-5);
+                
+            loss.backward();
+            // std::cout << "backward passed\n";
+            opti.step();
+            opti.zeroGrad();
+            // std::cout << "opti passed\n";
+            auto ids = out.argMax();
+            // std::cout << "argmax passed\n";
+            //for (auto& i : ids) std::cout << i <<' ';
+            if (i % 1 == 0) {
+                // std::cout << "Input  : " << intToString(dataset) << '\n';
+                // std::cout << "Target : " << intToString(target) << '\n';
+                // std::cout << "Pred   : " << intToString(ids) << '\n';
+            }
+        }
+    }
+    std::cout << '\n';
+    for (int i = trainLen; i < trainInput.size() - 1; i++) {
+        auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
+        std::cout << "Input: " << intToString(dataset) << '\n';
+        auto logits = model.forward(dataset);
+        logits.print();
+        std::cout << "Pred: " << intToString(logits.argMax()) << "\n\n";
+    }
 }

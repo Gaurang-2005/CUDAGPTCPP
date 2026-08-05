@@ -42,7 +42,7 @@ float accuracy(const tensor<float>& pred,
     return 100.0f * correct / pred.getShape()[0];
 }
 
-void run() {
+void mnist() {
     sequential<float> model{
         linear<float>(device::GPU, 256, 784),
         relu<float>(),
@@ -145,10 +145,11 @@ void run() {
 
     // images.toGPU();
     std::cout<<'\n';
-    SGD<float> optim(model.parameters(), 0.1);
+    Adam<float> optim(model.parameters(), 0.001);
     std::cout<<"training\n";
     // checkpoint("before training loop");
     for (int i = 0; i < 10000; i++) {
+        if (i == 330) optim.setLearningrate(0.001);
         // while (!cont) std::cin >> cont;
         // cont = false;
         // std::cout<<"loop start!\n";
@@ -174,84 +175,7 @@ void run() {
 }
 
 
-// #include "tokenizer/tokenizer.hpp"
-// int main() {
-//     //run();
-//     // std::cout
-//     //     << "Created : " << tensorsCreated << '\n'
-//     //     << "Destroyed: " << tensorsDestroyed << '\n'
-//     //     << "Live     : " << tensorsCreated - tensorsDestroyed << '\n';
-//     std::vector<std::string> file;
-//     file.push_back("Hello world! Hello world! Hello world!");
 
-//     file.push_back("The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.");
-
-//     file.push_back("Byte Pair Encoding repeatedly merges the most frequent adjacent pair of symbols until the vocabulary reaches the desired size.");
-
-//     file.push_back("Artificial intelligence, machine learning, deep learning, transformers, attention mechanisms, embeddings, optimization, CUDA programming, C++, Python, Linux.");
-
-//     file.push_back("India is the world's most populous country. It has many languages including Hindi, English, Tamil, Telugu, Bengali, Marathi, Punjabi, Gujarati, Kannada, and Malayalam.");
-
-//     file.push_back("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-
-//     file.push_back("abcabcabcabcabcabcabcabcabcabcabcabcabcabc");
-
-//     file.push_back("hello hello hello hello hello hello hello hello");
-
-//     file.push_back("token token tokenization tokenizer tokenize tokens tokenization");
-
-//     file.push_back("0 1 2 3 4 5 6 7 8 9");
-
-//     file.push_back("10 20 30 40 50 60 70 80 90 100");
-
-//     file.push_back("1234567890");
-
-//     file.push_back("3.14159265358979323846");
-
-//     file.push_back("-42 +73 -999 1e9");
-
-//     file.push_back("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-
-//     file.push_back("abcdefghijklmnopqrstuvwxyz");
-
-//     file.push_back("MixedCase mixedCASE MiXeDcAsE");
-
-//     file.push_back("! @ # $ % ^ & * ( ) _ + - = { } [ ] : ; \" ' < > , . ? / \\ | ~");
-
-//     file.push_back("This     line     contains     multiple     spaces.");
-
-//     file.push_back("Tabs\tshould\talso\tbe\thandled.");
-
-//     file.push_back("Line one.\nLine two.\nLine three.");
-
-//     file.push_back("Machine learning models learn from data. Machine learning models learn from data. Machine learning models learn from data.");
-
-//     file.push_back("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.");
-
-//     file.push_back("The rain in Spain stays mainly in the plain.");
-
-//     file.push_back("CUDA kernels execute thousands of threads in parallel for high throughput matrix multiplication.");
-
-//     file.push_back("Neural networks consist of layers, activations, weights, biases, gradients, optimizers, and loss functions.");
-
-//     file.push_back("BPE learns subwords like token, tokenizer, tokenize, tokenization, and tokens.");
-
-//     file.push_back("One fish two fish red fish blue fish.");
-
-//     file.push_back("To be, or not to be, that is the question.");
-
-//     file.push_back("The tokenizer should satisfy decode(encode(text)) == text.");
-//     BPE tokenizer(10000);
-//     std::cout << '\n';
-//     tokenizer.train(file);
-    
-//     auto out = tokenizer.encode(file[0]);
-//     for (size_t j = 0; j < out.size(); ++j) {
-//         std::cout << out[j] << ' ';
-//     } 
-//     std::cout << '\n';
-//     std::cout << tokenizer.decode(out) << '\n';
-// }
 
 
 #include "nn/gpt.hpp"
@@ -264,6 +188,61 @@ void run() {
 #include <sstream>
 #include <stdexcept>
 #include <string>
+
+std::string intToString(std::vector<TokenID> dat) {
+    std::string out;
+    for (auto& i : dat) out.push_back(char(i + 'A'));
+
+    return out;
+}
+
+void ABCD() {
+    std::string trainText = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    std::cout<<trainText<<std::endl;
+    std::cout << "size of dataset: "<< trainText.length() << '\n';
+    std::vector<TokenID> trainInput;
+
+    for (auto i : trainText) trainInput.push_back((i) - 65);
+    for (auto& i : trainInput) std::cout << i <<' ';
+    std::cout << '\n';
+    std::cout<<"tokenizer ready!!\n";
+    std::cout<<"encoded input ready!!\n";
+    int context = 8;
+    std::cout << "Encoded token count = " << trainInput.size() << '\n';
+    GPT<float> model(device::GPU, 26, context, 128, 1);
+    Adam<float> opti(model.parameters(), 0.0001); 
+    int trainLen = context;
+    for (int epoch = 0; epoch < 100; epoch++) {
+        std::cout << "epoch: " << epoch << '\n';
+        for (int i = trainLen; i < trainInput.size() - 1; i++) {
+            auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
+            auto target = std::vector<TokenID>(trainInput.begin() + i - trainLen + 1, trainInput.begin() + i + 1);
+            auto out = model.forward(dataset);
+            auto loss = crossEntropyLoss(out, target);
+            if (i == 24) {
+                loss.print();
+            }
+                
+            loss.backward();
+            opti.step();
+            opti.zeroGrad();
+            auto ids = out.argMax();
+            if (i % 1 == 0) {
+            }
+        }
+    }
+    std::cout << '\n';
+    for (int i = trainLen; i < trainInput.size() - 1; i++) {
+        auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
+        std::cout << "Input: " << intToString(dataset) << '\n';
+        auto logits = model.forward(dataset);
+        std::cout << "Pred: " << intToString(logits.argMax()[0]) << "\n\n";
+    }
+    auto dataset = std::vector<TokenID>(trainInput.begin(), trainInput.begin() + 1);
+    std::cout << "Input: " << intToString(dataset) << '\n';
+    auto logits = model.forward(dataset);
+    std::cout << "Pred: " << intToString(logits.argMax()[0]) << "\n\n";
+}
 
 std::string readDataset(const std::string& filename) {
     std::ifstream file(filename);
@@ -278,76 +257,40 @@ std::string readDataset(const std::string& filename) {
     return buffer.str();
 }
 
-std::string intToString(std::vector<TokenID> dat) {
-    std::string out;
-    for (auto& i : dat) out.push_back(char(i + 'A'));
-
-    return out;
-}
-
-int main() {
-    std::string trainText = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    std::cout<<trainText<<std::endl;
-    std::cout << "size of dataset: "<< trainText.length() << '\n';
-    std::vector<TokenID> trainInput;
-
-    for (auto i : trainText) trainInput.push_back((i) - 65);
-    for (auto& i : trainInput) std::cout << i <<' ';
-    std::cout << '\n';
-    // BPE<float> tokenizer(26);
+void tinyShake() {
+    std::string trainText = readDataset("datasets/tiny shakespeare/train.csv");
+    BPE<float> tokenizer(4096);
     // std::vector<std::string> doc;
     // doc.push_back(trainText);
 
     // tokenizer.train(doc);
     // tokenizer.save("tokenizerSave/tinyShakespeare/token.bin");
-    // tokenizer.load("tokenizerSave/tinyShakespeare/token.bin");
-    std::cout<<"tokenizer ready!!\n";
-    std::cout<<"encoded input ready!!\n";
-    int context = 8;
-    // auto trainInput = tokenizer.encode(trainText);
-    std::cout << "Encoded token count = " << trainInput.size() << '\n';
-    GPT<float> model(device::GPU, 26, context, 128, 1);
-    Adam<float> opti(model.parameters(), 0.0001); 
-    int trainLen = context;
-    for (int epoch = 0; epoch < 100; epoch++) {
-        std::cout << "epoch: " << epoch << '\n';
-        for (int i = trainLen; i < trainInput.size() - 1; i++) {
-            auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
-            auto target = std::vector<TokenID>(trainInput.begin() + i - trainLen + 1, trainInput.begin() + i + 1);
-            auto out = model.forward(dataset);
-            // std::cout << "forward passed\n";
-            auto loss = crossEntropyLoss(out, target);
-            // std::cout << "loss passed\n";
-            if (i == 24) {
-                // out.print();
-                loss.print();
-            }
-            // if (epoch == 600) opti.setLearningrate(1e-5);
-                
-            loss.backward();
-            // std::cout << "backward passed\n";
-            opti.step();
-            opti.zeroGrad();
-            // std::cout << "opti passed\n";
-            auto ids = out.argMax();
-            // std::cout << "argmax passed\n";
-            //for (auto& i : ids) std::cout << i <<' ';
-            if (i % 1 == 0) {
-                // std::cout << "Input  : " << intToString(dataset) << '\n';
-                // std::cout << "Target : " << intToString(target) << '\n';
-                // std::cout << "Pred   : " << intToString(ids) << '\n';
-            }
+    tokenizer.load("tokenizerSave/tinyShakespeare/token.bin");   
+    // std::ofstream inputOut("tempSave/input.bin", std::ios::binary);
+    // if (inputOut) {
+    //     inputOut.write(reinterpret_cast<char*>(&input), sizeof(input));
+    // }
+    std::vector<TokenID> input = tokenizer.encode(trainText);
+    std::vector<std::vector<TokenID>> inputDoc;
+    size_t context = 1024;
+    size_t batchSize;
+    for (int i = context; i < input.size() - context; ++i) {
+        inputDoc.emplace_back(input.begin() + i - context, input.begin() + i);
+    }
+    std::ofstream inputOut("tempSave/input.bin", std::ios::binary);
+    batchSize = inputDoc.size();
+    if (inputOut) {
+        inputOut.write(reinterpret_cast<char*>(&batchSize), sizeof(size_t));
+        inputOut.write(reinterpret_cast<char*>(&inputDoc), batchSize * context * sizeof(TokenID));
+    }
+    for (int i = 0; i < inputDoc.size(); ++i) {
+        for (int j = 0; j < inputDoc[i].size(); ++j) {
+            std::cout << inputDoc[i][j] << ' ';
         }
+        std::cout << std::endl;
     }
-    std::cout << '\n';
-    for (int i = trainLen; i < trainInput.size() - 1; i++) {
-        auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
-        std::cout << "Input: " << intToString(dataset) << '\n';
-        auto logits = model.forward(dataset);
-        std::cout << "Pred: " << intToString(logits.argMax()) << "\n\n";
-    }
-    auto dataset = std::vector<TokenID>(trainInput.begin(), trainInput.begin() + 1);
-    std::cout << "Input: " << intToString(dataset) << '\n';
-    auto logits = model.forward(dataset);
-    std::cout << "Pred: " << intToString(logits.argMax()) << "\n\n";
+}
+
+int main() {
+    tinyShake();
 }

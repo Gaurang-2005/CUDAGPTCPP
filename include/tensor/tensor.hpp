@@ -47,6 +47,23 @@ public:
         // std::cout << "Created: " << tensorsCreated
         //         << " Destroyed: " << tensorsDestroyed << '\n';
     }
+    tensor(device dev, const std::vector<size_t>& shape) : shape(shape), dev(dev), debugID(++id) {
+
+        for (auto& i : shape) {
+            storageLength*=i;
+        }
+        if (dev == device::CPU)
+        tens = new t[storageLength]{};
+
+        else if (dev == device::GPU) {
+            constructorAllocate();
+        }
+        tensorsCreated++;
+        addDebugId();
+        // std::cout << "Created: " << tensorsCreated
+        //         << " Destroyed: " << tensorsDestroyed << '\n';
+    }
+
     void addDebugId() {
         // if (debugID == 28) std::abort();
         if (debugTensorDeath) std::cout<<"tensor created with debugID: "<<debugID<<std::endl;
@@ -185,6 +202,16 @@ public:
         shape = newShape;
     }
 
+    void reshape(const std::vector<size_t>& newShape) {
+        if (isGradEnabled) throw std::invalid_argument("Cannot use in-place operations when autograd is enabled");
+        size_t newStorageLength = 1;
+        for (auto& i : newShape) {
+            newStorageLength *= i;
+        }
+        assert(newStorageLength == storageLength);
+        shape = newShape;
+    }
+
     template <typename ... Args>
     requires (std::integral<Args> && ...)
     tensor reshaped(Args...args) const & {
@@ -202,11 +229,43 @@ public:
         return temp;
     }
 
+    tensor reshaped(const std::vector<size_t>& newShape) const & {
+        tensor<t> temp(*this);
+        temp.shape = newShape;
+        size_t newStorageLength = 1;
+        for (auto& i : temp.shape) {
+            newStorageLength *= i;
+        }
+        assert(newStorageLength == storageLength);
+        if (isGradEnabled) {
+            temp.gradFunction = std::make_shared<reshapeNode<t>>(this, shape);
+            temp.isGradEnabled = true;
+        }
+        return temp;
+    }
+
     template <typename ... Args>
     requires (std::integral<Args> && ...)
     tensor reshaped(Args...args) const && {
         tensor<t> temp(*this);
         temp.shape = std::vector<size_t>({static_cast<size_t>(args)...});
+        size_t newStorageLength = 1;
+        for (auto& i : temp.shape) {
+            newStorageLength *= i;
+        }
+        assert(newStorageLength == storageLength);
+        if (isGradEnabled) {
+            std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+            temp.gradFunction = std::make_shared<reshapeNode<t>>(first, shape);
+            temp.isGradEnabled = true;
+        }
+        return temp;
+    }
+
+
+    tensor reshaped(const std::vector<size_t>& newShape) && {
+        tensor<t> temp(*this);
+        temp.shape = newShape;
         size_t newStorageLength = 1;
         for (auto& i : temp.shape) {
             newStorageLength *= i;
@@ -287,7 +346,7 @@ public:
         if (!isGradEnabled) throw std::invalid_argument("Gradient is not enabled on this tensor, so backward failed!");
 
 
-        grad = std::make_shared<tensor<t>>(device::GPU, gradFunction -> shape()[0], gradFunction -> shape()[1]);
+        grad = std::make_shared<tensor<t>>(device::GPU, gradFunction -> shape());
         grad->ones();
 
         if (gradFunction) gradFunction -> backward(*this);
@@ -333,7 +392,7 @@ public:
         return me * other;
     }
 
-    std::vector<TokenID> argMax() const;
+    std::vector<std::vector<TokenID>> argMax() const;
     tensor<t> operator+(t val) const;
     tensor<t> operator-(t val) const;
 };

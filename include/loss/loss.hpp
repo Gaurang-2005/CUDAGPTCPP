@@ -13,7 +13,7 @@ tensor<t> MSE(const tensor<t>& prediction, const tensor<t>& target) {
 template <typename t>
 tensor<t> crossEntropyLoss(const tensor<t>& prediction, const tensor<t>& target, const t tol = 1e-12) {
     if (prediction.numElements() != target.numElements()) throw std::invalid_argument("Prediction and target should have same size!");
-    tensor<t> tolerance(device::GPU, prediction.getShape()[0], prediction.getShape()[1]);
+    tensor<t> tolerance(device::GPU, prediction.getShape());
     tolerance.fill(tol);
     if (prediction.requiresGrad()) {
         prediction.requiresGrad(false);
@@ -28,6 +28,9 @@ tensor<t> crossEntropyLoss(const tensor<t>& prediction, const tensor<t>& target,
 
 template <typename t>
 tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<TokenID>& target);
+
+template <typename t>
+tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<std::vector<TokenID>>& target);
 
 template <typename t>
 tensor<t> crossEntropyLoss(const tensor<t>& prediction, const tensor<t>&& target) = delete;

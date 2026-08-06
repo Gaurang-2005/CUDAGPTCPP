@@ -76,6 +76,12 @@ template class singleHeadAttentionNode<double>;
 template class gatherNode<float>;
 template class gatherNode<double>;
 
+template class rowSumNode<float>;
+template class rowSumNode<double>;
+
+template class colSumNode<float>;
+template class colSumNode<double>;
+
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
@@ -449,26 +455,6 @@ void batchNode<t>::backward(const tensor<t>& owner) {
 }
 
 template <typename t>
-void layerNormNode<t>::backward(const tensor<t>& owner) {
-    input->requiresGrad(false);
-    owner.gradient()->requiresGrad(false);
-    gamma->requiresGrad(false);
-    beta->requiresGrad(false);
-    if (beta-> gradient()) *beta-> gradient() += owner.gradient()->colSum();
-    else beta-> setGradient(std::make_shared<tensor<t>>(owner.gradient()->colSum()));
-    if (gamma-> gradient()) *gamma-> gradient() += (*owner.gradient() * (*norm.get())).colSum();
-    else gamma-> setGradient(std::make_shared<tensor<t>>((*owner.gradient() * (*norm.get())).colSum()));
-    if (input-> gradient()) *input-> gradient() += (gamma->batch(inv->getShape()[0]) * (*inv.get()))*(*owner.gradient() - (owner.gradient()->rowSum()/owner.gradient()->getShape()[1]).batch(owner.gradient()->getShape()[1], 1) - (*norm.get()) * ((*owner.gradient() * (*norm.get())).rowSum()/owner.gradient()->getShape()[1]).batch(norm->getShape()[1], 1));
-    else input-> setGradient(std::make_shared<tensor<t>>(((gamma->batch(inv->getShape()[0]) * (*inv.get()))*(*owner.gradient() - (owner.gradient()->rowSum()/owner.gradient()->getShape()[1]).batch(owner.gradient()->getShape()[1], 1) - (*norm.get()) * ((*owner.gradient() * (*norm.get())).rowSum()/owner.gradient()->getShape()[1]).batch(norm->getShape()[1], 1)))));
-    input -> requiresGrad(true);
-    gamma -> requiresGrad(true);
-    beta -> requiresGrad(true);
-
-    if (input-> gradientFunction()) input-> gradientFunction() -> backward(*input.get());
-    input -> clearGradientFunction();
-}
-
-template <typename t>
 __global__ void tokenEmbeddingNodeKernel(t* grad, const t* outGrad, const TokenID* token, const size_t len, const size_t dim) {
     size_t tokenIdx = threadIdx.x + blockDim.x * blockIdx.x;
     size_t dimIdx = threadIdx.y + blockDim.y * blockIdx.y;
@@ -627,6 +613,38 @@ void gatherNode<t>::backward(const tensor<t>& owner) {
     cudaFree(temp);
     if (A-> gradient()) *A-> gradient() += grad;
     else A-> setGradient(std::make_shared<tensor<t>>(grad));
+    A-> requiresGrad(true);
+
+    if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
+}
+
+template <typename t>
+void rowSumNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient() -> requiresGrad(false);
+    A->requiresGrad(false);   
+    size_t colSize; 
+    if (A->getShape().size() == 2) colSize = A -> getShape()[1];
+    else if (A->getShape().size() == 3) colSize = A -> getShape()[2];
+    else throw std::invalid_argument("rowSumNode only supports rank-2 and rank-3 tensors");
+    if (A-> gradient()) *A-> gradient() += owner.gradient()->batch(colSize, 1);
+    else A-> setGradient(std::make_shared<tensor<t>>(owner.gradient()->batch(colSize, 1)));
+    A-> requiresGrad(true);
+
+    if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
+    A -> clearGradientFunction();
+}
+
+template <typename t>
+void colSumNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient() -> requiresGrad(false);
+    A->requiresGrad(false);   
+    size_t rowSize; 
+    if (A->getShape().size() == 2) rowSize = A -> getShape()[0];
+    else if (A->getShape().size() == 3) rowSize = A -> getShape()[1];
+    else throw std::invalid_argument("colSumNode only supports rank-2 and rank-3 tensors");
+    if (A-> gradient()) *A-> gradient() += owner.gradient()->batch(rowSize, 0);
+    else A-> setGradient(std::make_shared<tensor<t>>(owner.gradient()->batch(rowSize, 0)));
     A-> requiresGrad(true);
 
     if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());

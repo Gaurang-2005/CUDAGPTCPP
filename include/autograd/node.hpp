@@ -237,26 +237,15 @@ public:
 };
 
 template<typename t>
-class layerNormNode : public node<t> {
-    const tensorRef<t> gamma;
-    const tensorRef<t> beta;
-    const tensorRef<t> input;
-    const tensorRef<t> norm;
-    const tensorRef<t> inv;
-public:
-    std::vector<size_t> shape() override {return input->getShape();}
-    layerNormNode(const tensor<t>* gamma, const tensor<t>* beta, const std::shared_ptr<tensor<t>> norm, const std::shared_ptr<tensor<t>> inv, const tensor<t>* input) : gamma(gamma), beta(beta), norm(norm), inv(inv), input(input) {}
-    layerNormNode(const tensor<t>* gamma, const tensor<t>* beta, const std::shared_ptr<tensor<t>> norm, const std::shared_ptr<tensor<t>> inv, const std::shared_ptr<tensor<t>> input) : gamma(gamma), beta(beta), norm(norm), inv(inv), input(input) {}
-    virtual void backward(const tensor<t>& owner) override;
-};
-
-template<typename t>
 class tokenEmbeddingNode : public node<t> {
     const tensorRef<t> weight;
     const std::vector<TokenID> tokenIds;
+    const std::vector<std::vector<TokenID>> batchedTokenIDs;
+    const bool batched;
 public:
     std::vector<size_t> shape() override {return weight->getShape();}
-    tokenEmbeddingNode(const tensor<t>* A, const std::vector<TokenID>& tokenIds) : weight(A), tokenIds(tokenIds) {}
+    tokenEmbeddingNode(const tensor<t>* A, const std::vector<TokenID>& tokenIds) : weight(A), tokenIds(tokenIds), batched(false) {}
+    tokenEmbeddingNode(const tensor<t>* A, const std::vector<std::vector<TokenID>>& tokenIds) : weight(A), batchedTokenIDs(tokenIds), batched(true) {}
     virtual void backward(const tensor<t>& owner) override;
 };
 
@@ -290,9 +279,32 @@ public:
 template<typename t>
 class gatherNode : public node<t> {
     const tensorRef<t> A;
-    const std::vector<TokenID>* B;
+    const std::vector<TokenID> B;
+    const std::vector<std::vector<TokenID>> batchedB;
+    const bool batched;
 public:
     std::vector<size_t> shape() override {return A->getShape();}
-    gatherNode(const tensor<t>* A, const std::vector<TokenID>* B) : A(A), B(B) {}
+    gatherNode(const tensor<t>* A, const std::vector<TokenID>* B) : A(A), B(B), batched(false) {}
+    gatherNode(const tensor<t>* A, const std::vector<std::vector<TokenID>>* B) : A(A), batchedB(B), batched(true) {}
+    virtual void backward(const tensor<t>& owner) override;
+};
+
+template<typename t>
+class rowSumNode : public node<t> {
+    const tensorRef<t> A;
+public:
+    std::vector<size_t> shape() override {return A->getShape();}
+    rowSumNode(const tensor<t>* A) : A(A) {}
+    rowSumNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
+    virtual void backward(const tensor<t>& owner) override;
+};
+
+template<typename t>
+class colSumNode : public node<t> {
+    const tensorRef<t> A;
+public:
+    std::vector<size_t> shape() override {return A->getShape();}
+    colSumNode(const tensor<t>* A) : A(A) {}
+    colSumNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
 };

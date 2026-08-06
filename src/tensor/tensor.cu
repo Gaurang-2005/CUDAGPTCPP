@@ -1856,7 +1856,7 @@ __global__ void rowSum3DKernel(t* tens, t* out, size_t rows, size_t cols) {
 }
 
 template <typename t>
-tensor<t> tensor<t>::rowSum() const {
+tensor<t> tensor<t>::rowSum() const & {
     toGPU();
 
     tensor<t> out;
@@ -1883,6 +1883,50 @@ tensor<t> tensor<t>::rowSum() const {
                     << '\n';
             std::abort();
         }
+    }
+
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<geluNode<t>>(this);
+    }
+
+    return out;
+}
+
+template <typename t>
+tensor<t> tensor<t>::rowSum() && {
+    toGPU();
+
+    tensor<t> out;
+    if (shape.size() == 2) {
+        out = tensor<t>(device::GPU, shape[0], 1);
+        rowSumKernel<<<shape[0], 256>>>(tens, out.tens, shape[0], shape[1]);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 3) {
+        out = tensor<t>(device::GPU, shape[0], shape[1], 1);
+        rowSum3DKernel<<<dim3(shape[1], shape[0]), 256>>>(tens, out.tens, shape[1], shape[2]);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+
+    if (isGradEnabled) {
+        std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<geluNode<t>>(first);
     }
 
     return out;
@@ -1932,7 +1976,7 @@ __global__ void colSum3DKernel(t* tens, t* out, size_t rows, size_t cols) {
 }
 
 template <typename t>
-tensor<t> tensor<t>::colSum() const {
+tensor<t> tensor<t>::colSum() const & {
     toGPU();
 
     tensor<t> out;
@@ -1959,6 +2003,50 @@ tensor<t> tensor<t>::colSum() const {
                     << '\n';
             std::abort();
         }
+    }
+
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<geluNode<t>>(this);
+    }
+
+    return out;
+}
+
+template <typename t>
+tensor<t> tensor<t>::colSum() && {
+    toGPU();
+
+    tensor<t> out;
+    if (shape.size() == 2) {
+        out = tensor<t>(device::GPU, 1, shape[1]);
+        colSumKernel<<<shape[1], 256>>>(tens, out.tens, shape[0], shape[1]);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 3) {
+        out = tensor<t>(device::GPU, shape[0], 1, shape[2]);
+        colSum3DKernel<<<dim3(shape[2], shape[0]), 256>>>(tens, out.tens, shape[1], shape[2]);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+
+    if (isGradEnabled) {
+        std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<geluNode<t>>(first);
     }
 
     return out;
@@ -2249,7 +2337,7 @@ tensor<t> tensor<t>::batch(size_t batchSize, int axis) const & {
         batch2Kernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, batchSize);
     }
     if (axis == 2) {
-        out = tensor<t>(dev, shape[0], shape[1], shape[2]);
+        out = tensor<t>(dev, batchSize, shape[0], shape[1]);
         batch3Kernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, storageLength);
     }
     cudaDeviceSynchronize();
@@ -2279,7 +2367,7 @@ tensor<t> tensor<t>::batch(size_t batchSize, int axis) && {
         batch2Kernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, batchSize);
     }
     if (axis == 2) {
-        out = tensor<t>(dev, batchSize, shape[1], shape[2]);
+        out = tensor<t>(dev, batchSize, shape[0], shape[1]);
         batch3Kernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, storageLength);
     }
     cudaDeviceSynchronize();

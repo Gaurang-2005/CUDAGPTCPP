@@ -365,9 +365,11 @@ public:
     tensor log() const &;
     tensor log() &&;
 
-    tensor rowSum() const;
+    tensor rowSum() const &;
+    tensor rowSum() &&;
     tensor rowMax() const;
-    tensor colSum() const;
+    tensor colSum() const &;
+    tensor colSum() &&;
 
     // //Activation Functions
     tensor ReLU() const &;

@@ -55,10 +55,10 @@ class Adam : public optimizer<t> {
 public:
     Adam(const std::vector<tensor<t>*>& parameters, t val = 0.001) : optimizer<t>(parameters), learningRate(val), beta1(0.9), beta2(0.999) {
         for (auto& i : parameters) {
-            tensor<t> mt(i -> getDevice(), i -> getShape()[0], i -> getShape()[1]);
+            tensor<t> mt(i -> getDevice(), i -> getShape());
             mt.zeros();
 
-            tensor<t> vt(i -> getDevice(), i -> getShape()[0], i -> getShape()[1]);
+            tensor<t> vt(i -> getDevice(), i -> getShape());
             vt.zeros();
 
             m.push_back(std::move(mt));

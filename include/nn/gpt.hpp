@@ -28,6 +28,17 @@ public:
         }
         return lmHead.forward(finalNorm.forward(std::move(output.back())));
     }
+    tensor<t> forward(const std::vector<std::vector<TokenID>>& input) {
+        if (input.empty())
+            throw std::invalid_argument("Input batch cannot be empty.");
+        std::vector<tensor<t>> output;
+        output.reserve(blocks.size() + 1);
+        output.push_back(tokenEmb.forward(input) + posEmb.forward(input[0].size()));
+        for (auto& block : blocks) {
+            output.push_back(block.forward(std::move(output.back())));
+        }
+        return lmHead.forward(finalNorm.forward(std::move(output.back())));
+    }    
     std::vector<tensor<t>*> parameters() {
         std::vector<tensor<t>*> out;
         out.push_back(tokenEmb.parameters());

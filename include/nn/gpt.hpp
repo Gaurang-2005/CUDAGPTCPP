@@ -33,7 +33,7 @@ public:
             throw std::invalid_argument("Input batch cannot be empty.");
         std::vector<tensor<t>> output;
         output.reserve(blocks.size() + 1);
-        output.push_back(tokenEmb.forward(input) + posEmb.forward(input[0].size()));
+        output.push_back(tokenEmb.forward(input) + posEmb.forward(input[0].size(), input.size()));
         for (auto& block : blocks) {
             output.push_back(block.forward(std::move(output.back())));
         }

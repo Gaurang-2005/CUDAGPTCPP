@@ -10,6 +10,16 @@ template tensor<double> crossEntropyLoss(
     const std::vector<TokenID>&
 );
 
+template tensor<float> crossEntropyLoss(
+    const tensor<float>&,
+    const std::vector<std::vector<TokenID>>&
+);
+
+template tensor<double> crossEntropyLoss(
+    const tensor<double>&,
+    const std::vector<std::vector<TokenID>>&
+);
+
 template <typename t>
 __global__ void crossEntropyLossLLMKernel(t* out, const t* logits, const TokenID* targ, const size_t targLength, const size_t vocabLen) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -72,14 +82,11 @@ tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<TokenID>& 
 template <typename t>
 tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<std::vector<TokenID>>& target) {
     if (logits.getShape()[0] != target.size()) throw std::invalid_argument("Prediction and target should have same batch size!");
-    if (!logits.requiresGrad()) throw std::invalid_argument("LLM needs ");
     auto maxes = logits.rowMax();
     auto maxes2 = maxes;
-
-    auto shifted = logits - std::move(maxes).batch(logits.getShape()[2], 1);      
-
+    auto shifted = logits - std::move(maxes).batch(logits.getShape()[2], 1);     
+    //shifted.print(); 
     auto sumExp = std::move(shifted).exp().rowSum();
-
     auto logSumExp = std::move(sumExp).log() + std::move(maxes2);
     tensor<t> out(device::GPU, logits.getShape()[0], logits.getShape()[1], 1);
     std::vector<TokenID> targComb;

@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <functional>
 #include "tokenizer/types.hpp"
+#include "fstream"
 
 struct pairHash {
     size_t operator()(const TokenPair& p) const noexcept {

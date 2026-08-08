@@ -61,9 +61,6 @@ template class crossEntropyLossNode<double>;
 template class batchNode<float>;
 template class batchNode<double>;
 
-template class layerNormNode<float>;
-template class layerNormNode<double>;
-
 template class tokenEmbeddingNode<float>;
 template class tokenEmbeddingNode<double>;
 
@@ -84,6 +81,7 @@ template class colSumNode<double>;
 
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient()->requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += *owner.gradient();
@@ -101,6 +99,7 @@ void addNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void subtractNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient()->requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += *owner.gradient();
@@ -160,8 +159,14 @@ void matMulNode<t>::backward(const tensor<t>& owner) {
     // std::cout<<A->getShape()[0]<<' '<<A->getShape()[1]<<'\n';
     if (A -> gradient()) *A -> gradient() += (*owner.gradient()).matMul(B -> transposed());
     else A -> setGradient(std::make_shared<tensor<t>>((*owner.gradient()).matMul(B -> transposed())));
-    if (B -> gradient()) *B -> gradient() += (A -> transposed()).matMul(*owner.gradient());
-    else B -> setGradient(std::make_shared<tensor<t>>((A -> transposed()).matMul(*owner.gradient())));
+    if (B -> getShape().size() == A -> getShape().size()) {
+        if (B -> gradient()) *B -> gradient() += (A -> transposed()).matMul(*owner.gradient());
+        else B -> setGradient(std::make_shared<tensor<t>>((A -> transposed()).matMul(*owner.gradient())));
+    }
+    else {
+        if (B -> gradient()) *B -> gradient() += (A -> transposed()).matMul(*owner.gradient()).batchSum();
+        else B -> setGradient(std::make_shared<tensor<t>>((A -> transposed()).matMul(*owner.gradient()).batchSum()));
+    }
     A->requiresGrad(true);
     B->requiresGrad(true);
 
@@ -187,7 +192,7 @@ template <typename t>
 void sumNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    tensor<t> temp(device::GPU, A->getShape()[0], A->getShape()[1]);
+    tensor<t> temp(device::GPU, A->getShape());
     owner.gradient()->toCPU();
     temp.fill(owner.gradient()->data()[0]);
     if (A -> gradient()) *A -> gradient() += temp;
@@ -202,9 +207,9 @@ template <typename t>
 void meanNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    tensor<t> temp(device::GPU, A->getShape()[0], A->getShape()[1]);
+    tensor<t> temp(device::GPU, A->getShape());
     owner.gradient()->toCPU();
-    temp.fill(owner.gradient()->data()[0]/temp.numElements());
+    temp.fill(owner.gradient()->data()[0] / temp.numElements());
     if (A -> gradient()) *A -> gradient() += temp;
     else A -> setGradient(std::make_shared<tensor<t>>(temp));
     A->requiresGrad(true);
@@ -217,8 +222,8 @@ template <typename t>
 void reshapeNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += owner.gradient()->reshaped(oldShape[0], oldShape[1]);
-    else A -> setGradient(std::make_shared<tensor<t>>(owner.gradient()->reshaped(oldShape[0], oldShape[1])));
+    if (A -> gradient()) *A -> gradient() += owner.gradient()->reshaped(oldShape);
+    else A -> setGradient(std::make_shared<tensor<t>>(owner.gradient()->reshaped(oldShape)));
     A->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
@@ -277,7 +282,7 @@ template <typename t>
 void reluNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    tensor<t> temp(device::GPU, A->getShape()[0], A->getShape()[1]);
+    tensor<t> temp(device::GPU, A->getShape());
     reluGradKernel<<<cuda::ceil_div(temp.numElements(), 256), 256>>>(A->data(),temp.data(), temp.numElements());
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -298,9 +303,10 @@ void reluNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void sigmoidNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient() -> requiresGrad(false);
     owner.requiresGrad(false);
     A->requiresGrad(false);
-    tensor<t> one(device::GPU, owner.getShape()[0], owner.getShape()[1]);
+    tensor<t> one(device::GPU, owner.getShape());
     one.ones();
     tensor<t> temp = owner * (one - owner);
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * temp;
@@ -313,10 +319,11 @@ void sigmoidNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void tanhNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     tensor<t> temp = A->tanh();
     temp *= temp;
-    tensor<t> one(device::GPU, A->getShape()[0], A->getShape()[1]);
+    tensor<t> one(device::GPU, A->getShape());
     one.ones();
     temp = one - temp;
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * temp;
@@ -347,7 +354,7 @@ template <typename t>
 void geluNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    tensor<t> temp(device::GPU, A->getShape()[0], A->getShape()[1]);
+    tensor<t> temp(device::GPU, A->getShape());
     geluGradKernel<<<cuda::ceil_div(temp.numElements(), 256), 256>>>(A->data(),temp.data(), temp.numElements());
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -373,7 +380,7 @@ __global__ void broadcastSubtractKernel(t* A, t* B, t* out, size_t row, size_t c
 
     if (idxX >= col ||  idxY >= row) return;
 
-    out[idxY*col + idxX] = A[idxY*col + idxX] - B[idxY];
+    out[blockIdx.z * row * col + idxY * col + idxX] = A[blockIdx.z * row * col + idxY * col + idxX] - B[blockIdx.z * row + idxY];
 }
 
 template <typename t>
@@ -383,11 +390,19 @@ void softmaxNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     owner.requiresGrad(false);
-    tensor<t> temp(device::GPU, A->getShape()[0], A->getShape()[1]);
+    tensor<t> temp(device::GPU, A->getShape());
     tensor<t> dotProd = (*owner.gradient() * owner).rowSum();
-    dim3 blocks = dim3(cuda::ceil_div(A->getShape()[1], 16), cuda::ceil_div(A->getShape()[0], 16));
-    dim3 threads = dim3(16, 16);
-    broadcastSubtractKernel<<<blocks, threads>>>(owner.gradient()->data(), dotProd.data(), temp.data(), A->getShape()[0], A->getShape()[1]);
+    dim3 blocks, threads;
+    if (temp.getShape().size() == 2) {
+        blocks = dim3(cuda::ceil_div(A->getShape()[1], 16), cuda::ceil_div(A->getShape()[0], 16));
+        threads = dim3(16, 16);
+        broadcastSubtractKernel<<<blocks, threads>>>(owner.gradient()->data(), dotProd.data(), temp.data(), A->getShape()[0], A->getShape()[1]);
+    }
+    if (temp.getShape().size() == 3) {
+        blocks = dim3(cuda::ceil_div(A->getShape()[2], 16), cuda::ceil_div(A->getShape()[1], 16), A->getShape()[0]);
+        threads = dim3(16, 16, 1);
+        broadcastSubtractKernel<<<blocks, threads>>>(owner.gradient()->data(), dotProd.data(), temp.data(), A->getShape()[1], A->getShape()[2]);
+    }    
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -418,8 +433,8 @@ template <typename t>
 void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    tensor<t> temp(device::GPU, A->getShape()[0], A->getShape()[1]);
-    crossEntropyGradKernel<<<cuda::ceil_div(temp.numElements(), 256), 256>>>(A->data(), B->data(), temp.data(), temp.numElements(), temp.getShape()[0]);
+    tensor<t> temp(device::GPU, A->getShape());
+    crossEntropyGradKernel<<<cuda::ceil_div(temp.numElements(), 256), 256>>>(A->data(), B->data(), temp.data(), temp.numElements(), ((temp.getShape().size() == 2) ? temp.getShape()[0] : temp.getShape()[0] * temp.getShape()[1]));
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -440,13 +455,19 @@ void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
 template <typename t>
 void batchNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
-    if (!axis) {    
+    owner.gradient()->requiresGrad(false);
+    // std::cout << "batch Node: " << owner.DebugID() << ' ' << owner.gradient()->DebugID() << '\n';
+    if (axis == 0) {    
         if (A -> gradient()) *A -> gradient() += owner.gradient()->colSum();
         else A -> setGradient(std::make_shared<tensor<t>>(owner.gradient()->colSum()));
     }
-    else {
+    else if (axis == 1) {
         if (A -> gradient()) *A -> gradient() += owner.gradient()->rowSum();
         else A -> setGradient(std::make_shared<tensor<t>>(owner.gradient()->rowSum()));
+    }
+    else {
+        if (A -> gradient()) *A -> gradient() += owner.gradient()->batchSum();
+        else A -> setGradient(std::make_shared<tensor<t>>(owner.gradient()->batchSum()));
     }
     A -> requiresGrad(true);
 
@@ -461,46 +482,88 @@ __global__ void tokenEmbeddingNodeKernel(t* grad, const t* outGrad, const TokenI
     
     if (tokenIdx >= len || dimIdx >= dim) return;
 
-    atomicAdd(&grad[token[tokenIdx] * dim + dimIdx], outGrad[tokenIdx * dim + dimIdx]);
+    atomicAdd(&grad[token[blockIdx.z * len + tokenIdx] * dim + dimIdx], outGrad[(blockIdx.z * len + tokenIdx) * dim + dimIdx]);
 }
 
 template <typename t>
 void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
-    size_t len = tokenIds.size();
-    TokenID* tokenIdsCpy = new TokenID[len];
-    for (int i = 0; i < len; i++) tokenIdsCpy[i] = tokenIds[i];
-    weight->requiresGrad(false);
-    if (!weight->gradient()) {
-        weight->setGradient(std::make_shared<tensor<t>>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
-        weight->gradient()->zeros();
+    owner.gradient() -> requiresGrad(false);
+    if (!batched) {
+        size_t len = tokenIds.size();
+        weight->requiresGrad(false);
+        if (!weight->gradient()) {
+            weight->setGradient(std::make_shared<tensor<t>>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
+            weight->gradient()->zeros();
+        }
+        TokenID* temp;
+        cudaError_t err = cudaMalloc(&temp, len * sizeof(TokenID));
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMalloc failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        err = cudaMemcpy(temp, tokenIds.data(), len * sizeof(TokenID), cudaMemcpyDefault);
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMemcpy failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        } 
+        tokenEmbeddingNodeKernel<<<dim3(cuda::ceil_div(len, 16),cuda::ceil_div(weight->getShape()[1], 16)), dim3(16, 16)>>>(weight->gradient()->data(), owner.gradient()->data(), temp, len, weight->getShape()[1]);
+        cudaDeviceSynchronize();
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        cudaFree(temp);
+        weight -> requiresGrad(true);
     }
-    TokenID* temp;
-    cudaError_t err = cudaMalloc(&temp, len * sizeof(TokenID));
-    if (err != cudaSuccess) {
-        std::cerr << "cudaMalloc failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    else {
+        size_t batchSize = batchedTokenIDs.size();
+        size_t len = batchedTokenIDs[0].size();
+        std::vector<TokenID> singleBatch;
+        singleBatch.reserve(batchSize * len);
+        for (auto& i : batchedTokenIDs) {
+            for (auto& j : i) {
+                singleBatch.push_back(j);
+            }
+        }
+        weight->requiresGrad(false);
+        if (!weight->gradient()) {
+            weight->setGradient(std::make_shared<tensor<t>>(device::GPU, weight->getShape()));
+            weight->gradient()->zeros();
+        }
+        TokenID* temp;
+        cudaError_t err = cudaMalloc(&temp, len * batchSize * sizeof(TokenID));
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMalloc failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        err = cudaMemcpy(temp, singleBatch.data(), len * batchSize * sizeof(TokenID), cudaMemcpyDefault);
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMemcpy failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        } 
+        tokenEmbeddingNodeKernel<<<dim3(cuda::ceil_div(len, 16),cuda::ceil_div(weight->getShape()[1], 16), batchSize), dim3(16, 16, 1)>>>(weight->gradient()->data(), owner.gradient()->data(), temp, len, weight->getShape()[1]);
+        cudaDeviceSynchronize();
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        cudaFree(temp);
+        weight -> requiresGrad(true);
     }
-    err = cudaMemcpy(temp, tokenIdsCpy, len * sizeof(TokenID), cudaMemcpyDefault);
-    if (err != cudaSuccess) {
-        std::cerr << "cudaMemcpy failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
-    } 
-    delete[] tokenIdsCpy;  
-    tokenEmbeddingNodeKernel<<<dim3(cuda::ceil_div(len, 16),cuda::ceil_div(weight->getShape()[1], 16)), dim3(16, 16)>>>(weight->gradient()->data(), owner.gradient()->data(), temp, len, weight->getShape()[1]);
-    cudaDeviceSynchronize();
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
-    }
-    cudaFree(temp);
-    weight -> requiresGrad(true);
 
     if (weight -> gradientFunction()) weight -> gradientFunction() -> backward(*weight.get());
     weight -> clearGradientFunction();
@@ -512,17 +575,18 @@ __global__ void positionEmbeddingNodeKernel(t* grad, const t* outGrad, const siz
 
     if (idx >= storageLength) return;
 
-    grad[idx] += outGrad[idx];
+    grad[idx] = outGrad[idx];
 }
 
 template <typename t>
 void positionEmbeddingNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient() -> requiresGrad(false);
     weight->requiresGrad(false);
     if (!weight->gradient()) {
-        weight->setGradient(std::make_shared<tensor<t>>(device::GPU, weight->getShape()[0], weight->getShape()[1]));
+        weight->setGradient(std::make_shared<tensor<t>>(device::GPU, weight->getShape()));
         weight->gradient()->zeros();
     }
-    positionEmbeddingNodeKernel<<<cuda::ceil_div(owner.gradient()->numElements(), 256), 256>>>(weight->gradient()->data(), owner.gradient()->data(), owner.gradient()->numElements());
+    positionEmbeddingNodeKernel<<<dim3(cuda::ceil_div(owner.gradient()->numElements(), 256)), dim3(256)>>>(weight->gradient()->data(), owner.gradient()->data(), owner.gradient()->numElements());
     cudaError_t err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -546,9 +610,15 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
     auto dV = score->transposed().matMul(*owner.gradient());
     if (score-> gradient()) *score-> gradient() += owner.gradient()->matMul(V->transposed());
     else score-> setGradient(std::make_shared<tensor<t>>(owner.gradient()->matMul(V->transposed())));
-    if (wVal-> gradient()) *wVal-> gradient() += input->transposed().matMul(dV);
-    else wVal-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dV)));
-    tensor<t> tempSoftGrad(device::GPU, score->getShape()[0], score->getShape()[1]);
+    if (owner.gradient()->getShape().size() == 2) {
+        if (wVal-> gradient()) *wVal-> gradient() += input->transposed().matMul(dV);
+        else wVal-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dV)));
+    }
+    else if (owner.gradient()->getShape().size() == 3) {
+        if (wVal-> gradient()) *wVal-> gradient() += input->transposed().matMul(dV).batchSum();
+        else wVal-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dV).batchSum()));
+    }
+    tensor<t> tempSoftGrad(device::GPU, score->getShape());
     softmaxNode<t> temp(&tempSoftGrad);
     temp.backward(*score.get());
     score->requiresGrad(false);
@@ -556,12 +626,22 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
     softmaxGrad = softmaxGrad / sqrt(wQuery->getShape()[1]);
     auto dQ = softmaxGrad.matMul(*K.get());
     auto dK = softmaxGrad.transposed().matMul(*Q.get());
-    if (wKey-> gradient()) *wKey-> gradient() += input->transposed().matMul(dK);
-    else wKey-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dK)));
-    if (wQuery-> gradient()) *wQuery-> gradient() += input->transposed().matMul(dQ);
-    else wQuery-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dQ)));
-    if (input-> gradient()) *input-> gradient() += dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed());
-    else input-> setGradient(std::make_shared<tensor<t>>(dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed())));
+    if (owner.gradient()->getShape().size() == 2) {
+        if (wKey-> gradient()) *wKey-> gradient() += input->transposed().matMul(dK);
+        else wKey-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dK)));
+        if (wQuery-> gradient()) *wQuery-> gradient() += input->transposed().matMul(dQ);
+        else wQuery-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dQ)));
+        if (input-> gradient()) *input-> gradient() += dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed());
+        else input-> setGradient(std::make_shared<tensor<t>>(dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed())));
+    }
+    else if (owner.gradient()->getShape().size() == 3) {
+        if (wKey-> gradient()) *wKey-> gradient() += input->transposed().matMul(dK).batchSum();
+        else wKey-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dK).batchSum()));
+        if (wQuery-> gradient()) *wQuery-> gradient() += input->transposed().matMul(dQ).batchSum();
+        else wQuery-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dQ).batchSum()));
+        if (input-> gradient()) *input-> gradient() += dV.matMul(wVal->transposed().batch(dV.getShape()[0], 2)) + dK.matMul(wKey->transposed().batch(dK.getShape()[0], 2)) + dQ.matMul(wQuery->transposed().batch(dQ.getShape()[0], 2));
+        else input-> setGradient(std::make_shared<tensor<t>>(dV.matMul(wVal->transposed().batch(dV.getShape()[0], 2)) + dK.matMul(wKey->transposed().batch(dK.getShape()[0], 2)) + dQ.matMul(wQuery->transposed().batch(dQ.getShape()[0], 2))));
+    }
     wQuery->requiresGrad(true);
     wKey->requiresGrad(true);
     wVal->requiresGrad(true);
@@ -577,33 +657,58 @@ __global__ void scatterKernel(t* grad, const t* ownerGrad, const TokenID* targ, 
 
     if (idx >= targLength) return;
 
-    grad[idx * vocabLen + targ[idx]] = ownerGrad[idx];
+    grad[idx * vocabLen + targ[idx + blockIdx.y * targLength] + blockIdx.y * targLength * vocabLen] = ownerGrad[idx + blockIdx.y * targLength];
 }
 
 template <typename t>
 void gatherNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    tensor<t> grad(device::GPU, A->getShape()[0], A->getShape()[1]);
+    tensor<t> grad(device::GPU, A->getShape());
     grad.zeros();
     TokenID* temp;
-    cudaError_t err = cudaMalloc(&temp, B->size() * sizeof(TokenID));
-    if (err != cudaSuccess) {
-        std::cerr << "cudaMalloc failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (!batched) {
+        cudaError_t err = cudaMalloc(&temp, B->size() * sizeof(TokenID));
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMalloc failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        err = cudaMemcpy(temp, B->data(), B->size() * sizeof(TokenID), cudaMemcpyDefault);
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMemcpy failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        owner.gradient()->toGPU();
+        scatterKernel<<<cuda::ceil_div(B->size(), 256), 256>>>(grad.data(), owner.gradient()->data(), temp, B->size(), grad.getShape()[1]);
     }
-    err = cudaMemcpy(temp, B->data(), B->size() * sizeof(TokenID), cudaMemcpyDefault);
-    if (err != cudaSuccess) {
-        std::cerr << "cudaMemcpy failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    else {
+        cudaError_t err = cudaMalloc(&temp, batchedB->size() * (*batchedB)[0].size() * sizeof(TokenID));
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMalloc failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        std::vector<TokenID> temp2;
+        temp2.reserve(batchedB->size() * (*batchedB)[0].size());
+        for (auto& i : *batchedB) {
+            for (auto& j : i) temp2.push_back(j);
+        }
+        err = cudaMemcpy(temp, temp2.data(), batchedB->size() * (*batchedB)[0].size() * sizeof(TokenID), cudaMemcpyDefault);
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMemcpy failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        owner.gradient()->toGPU();
+        scatterKernel<<<dim3(cuda::ceil_div((*batchedB)[0].size(), 256), batchedB->size()), dim3(256, 1)>>>(grad.data(), owner.gradient()->data(), temp, (*batchedB)[0].size(), grad.getShape()[2]);
     }
-    owner.gradient()->toGPU();
-    scatterKernel<<<cuda::ceil_div(B->size(), 256), 256>>>(grad.data(), owner.gradient()->data(), temp, B->size(), grad.getShape()[1]);
-    err = cudaDeviceSynchronize();
+    cudaError_t err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)

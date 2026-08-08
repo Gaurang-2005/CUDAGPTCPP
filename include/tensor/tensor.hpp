@@ -28,6 +28,7 @@ class tensor {
     mutable std::shared_ptr<tensor<t>> grad = nullptr;
     bool isIdentity = false;
     size_t debugID;
+    bool isGradient = false;
 public:
     template <typename ... Args>
     requires (std::integral<Args> && ...)
@@ -63,10 +64,12 @@ public:
         // std::cout << "Created: " << tensorsCreated
         //         << " Destroyed: " << tensorsDestroyed << '\n';
     }
-
+    size_t DebugID() const {return debugID;}
     void addDebugId() {
-        // if (debugID == 28) std::abort();
-        if (debugTensorDeath) std::cout<<"tensor created with debugID: "<<debugID<<std::endl;
+        // if (debugID == 1688) {
+        //     std::cout << isGradEnabled << '\n';
+        //     std::abort();}
+        if (debugTensorDeath) std::cout<<"tensor " << this << " created with debugID: "<<debugID<<'\n';
     }
     tensor(device dev, std::initializer_list<std::initializer_list<t>> list);
 
@@ -96,6 +99,11 @@ public:
         gradFunction.reset();
     }
     void setGradient(std::shared_ptr<tensor<t>> gradient) const {
+        if (gradient) {
+            gradient -> isGradient = true;
+            gradient -> requiresGrad(false);
+            gradient -> gradFunction = nullptr;
+        }
         grad = gradient;
     }
     void setGradientFunction(std::shared_ptr<node<t>> gradFunction) const {
@@ -384,7 +392,7 @@ public:
     tensor softmax() &&;
 
     void clearGrad() const {
-        grad = nullptr;
+        grad.reset();
     }
 
     tensor batch(size_t batchSize, int axis = 0) const &;
@@ -397,4 +405,5 @@ public:
     std::vector<std::vector<TokenID>> argMax() const;
     tensor<t> operator+(t val) const;
     tensor<t> operator-(t val) const;
+    tensor<t> batchSum() const;
 };

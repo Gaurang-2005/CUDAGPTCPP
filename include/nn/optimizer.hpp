@@ -17,7 +17,9 @@ public:
     }
 
     void zeroGrad() {
-        for (auto& i : parameters) i -> gradient() -> zeros();
+        for (auto& i : parameters) {
+            i -> gradient() -> zeros();
+        }
     }
     void clearGrad() {
         for (auto& i : parameters) i -> clearGrad();
@@ -53,14 +55,14 @@ class Adam : public optimizer<t> {
     size_t st = 0;
     t epsilon = 1e-8;
 public:
-    Adam(const std::vector<tensor<t>*>& parameters, t val = 0.001) : optimizer<t>(parameters), learningRate(val), beta1(0.9), beta2(0.999) {
+    Adam(const std::vector<tensor<t>*>& parameters, t val = 0.0001) : optimizer<t>(parameters), learningRate(val), beta1(0.9), beta2(0.999) {
         for (auto& i : parameters) {
             tensor<t> mt(i -> getDevice(), i -> getShape());
             mt.zeros();
-
+            mt.requiresGrad(false);
             tensor<t> vt(i -> getDevice(), i -> getShape());
             vt.zeros();
-
+            vt.requiresGrad(false);
             m.push_back(std::move(mt));
             v.push_back(std::move(vt));            
         }
@@ -72,12 +74,12 @@ public:
         st++;
         t bias1 = 1 - std::pow(beta1, st);
         t bias2 = 1 - std::pow(beta2, st);
-        for (size_t i = 0; i < this -> parameters.size(); i++) {         
+        for (size_t i = 0; i < this -> parameters.size(); i++) {   
             m[i].toGPU();
             v[i].toGPU();
+            this -> parameters[i] -> requiresGrad(false);
             m[i] = m[i] * beta1 + *(this -> parameters[i] -> gradient()) * (1 - beta1);
             v[i] = v[i] * beta2 + *(this -> parameters[i] -> gradient()) * *(this -> parameters[i] -> gradient()) * (1 - beta2);
-            this -> parameters[i] -> requiresGrad(false);
             *(this -> parameters[i]) = *(this -> parameters[i]) - ((m[i] / bias1) / ((v[i] / bias2).pow(0.5) + epsilon)) * learningRate;
             this -> parameters[i] -> requiresGrad(true);
         }

@@ -21,7 +21,7 @@ class tensorRef {
     const tensor<t>* borrowed = nullptr;
     const std::shared_ptr<tensor<t>> rValue;
 public:
-    tensorRef(const std::shared_ptr<tensor<t>> rValue) : borrowed(rValue.get()), rValue(std::move(rValue)) {}
+    tensorRef(const std::shared_ptr<tensor<t>>& rValue) : borrowed(rValue.get()), rValue(std::move(rValue)) {}
     tensorRef(const tensor<t>* borrowed) : borrowed(borrowed) {}
     const tensor<t>* operator->() const {return borrowed;}   
     const tensor<t>* get() const {return borrowed;}
@@ -279,8 +279,8 @@ public:
 template<typename t>
 class gatherNode : public node<t> {
     const tensorRef<t> A;
-    const std::vector<TokenID> B;
-    const std::vector<std::vector<TokenID>> batchedB;
+    const std::vector<TokenID>* B;
+    const std::vector<std::vector<TokenID>>* batchedB;
     const bool batched;
 public:
     std::vector<size_t> shape() override {return A->getShape();}

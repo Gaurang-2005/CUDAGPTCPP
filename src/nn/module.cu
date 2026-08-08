@@ -121,8 +121,8 @@ tensor<t> positionEmbedding<t>::forward(size_t len, size_t batchSize) {
     }
     out.requiresGrad(true);
     out.setGradientFunction(std::make_shared<positionEmbeddingNode<t>>(&weight, len));
-    if (batchSize > 1) return out.batch(batchSize, 2);
-    else out;
+    if (batchSize > 1) return std::move(out).batch(batchSize, 2);
+    else return out;
 }
 
 template <typename t>
@@ -159,7 +159,7 @@ tensor<t> singleHeadAttention<t>::scaledDotProductAttention(const tensor<t>& Q, 
                     << cudaGetErrorString(err)
                     << '\n';
             std::abort();
-        }    
+        } 
         score = std::make_shared<tensor<t>>(scores.softmax());
     }
     return score->matMul(V);

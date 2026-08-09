@@ -375,7 +375,8 @@ public:
 
     tensor rowSum() const &;
     tensor rowSum() &&;
-    tensor rowMax() const;
+    tensor rowMax() const &;
+    tensor rowMax() &&;
     tensor colSum() const &;
     tensor colSum() &&;
 
@@ -406,4 +407,11 @@ public:
     tensor<t> operator+(t val) const;
     tensor<t> operator-(t val) const;
     tensor<t> batchSum() const;
+    void printShape() {
+        std::cout << "shape: ";
+        for (auto& i : shape) {
+            std::cout << i << ' ';
+        }
+        std::cout <<'\n';
+    }
 };

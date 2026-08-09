@@ -95,3 +95,5 @@ datasets/
 outputs/
 logs/
 tokenizerSave/
+
+.openCode/

@@ -308,3 +308,13 @@ public:
     colSumNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
 };
+
+template<typename t>
+class rowMaxNode : public node<t> {
+    const tensorRef<t> A;
+public:
+    std::vector<size_t> shape() override {return A->getShape();}
+    rowMaxNode(const tensor<t>* A) : A(A) {}
+    rowMaxNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
+    virtual void backward(const tensor<t>& owner) override;
+};

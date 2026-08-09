@@ -205,11 +205,11 @@ void ABCD() {
     std::cout << '\n';
     std::cout<<"tokenizer ready!!\n";
     std::cout<<"encoded input ready!!\n";
-    int context = 25;
+    int context = 4;
     std::cout << "Encoded token count = " << trainInput.size() << '\n';
     GPT<float> model(device::GPU, 26, context, 128, 1);
-    Adam<float> opti(model.parameters(), 0.0001); 
-    int trainLen = 1;
+    Adam<float> opti(model.parameters(), 0.001); 
+    int trainLen = 4;
     std::vector<std::vector<TokenID>> inputDat;
     std::vector<std::vector<TokenID>> targDat;
     for (int i = trainLen; i < trainInput.size() - 1; i++) {
@@ -217,14 +217,11 @@ void ABCD() {
         targDat.push_back(std::vector<TokenID>(trainInput.begin() + i - trainLen + 1, trainInput.begin() + i + 1));
     }
     for (int epoch = 0; epoch < 1000; epoch++) {
-        std::cout << "epoch: " << epoch << '\n';
-        // for (int i = trainLen; i < trainInput.size() - 1; i++) {
-        //     auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
-        //     auto target = std::vector<TokenID>(trainInput.begin() + i - trainLen + 1, trainInput.begin() + i + 1);
-            auto out = model.forward(inputDat);
-            auto loss = crossEntropyLoss(out, targDat);
-
-            loss.print();
+        std::cout << "epoch: " << epoch << " loss: ";
+        auto out = model.forward(inputDat);
+        auto loss = crossEntropyLoss(out, targDat);
+        loss.toCPU();
+        std::cout << loss(0, 0) << '\n';
 
                 
             loss.backward();
@@ -263,52 +260,47 @@ void ABCD2() {
     std::cout << "size of dataset: "<< trainText.length() << '\n';
     std::vector<TokenID> trainInput;
 
+
     for (auto i : trainText) trainInput.push_back((i) - 65);
     for (auto& i : trainInput) std::cout << i <<' ';
     std::cout << '\n';
+    // BPE<float> tokenizer(26);
+    // std::vector<std::string> doc;
+    // doc.push_back(trainText);
+
+
+    // tokenizer.train(doc);
+    // tokenizer.save("tokenizerSave/tinyShakespeare/token.bin");
+    // tokenizer.load("tokenizerSave/tinyShakespeare/token.bin");
     std::cout<<"tokenizer ready!!\n";
     std::cout<<"encoded input ready!!\n";
     int context = 8;
+    // auto trainInput = tokenizer.encode(trainText);
     std::cout << "Encoded token count = " << trainInput.size() << '\n';
-    GPT<float> model(device::GPU, 26, context, 128, 1);
-    SGD<float> opti(model.parameters(), 0.00001); 
-    int trainLen = 6;
-    std::vector<std::vector<TokenID>> inputDat;
-    std::vector<std::vector<TokenID>> targDat;
-    for (int i = trainLen; i < trainInput.size() - 1; i++) {
-        inputDat.push_back(std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i));
-        targDat.push_back(std::vector<TokenID>(trainInput.begin() + i - trainLen + 1, trainInput.begin() + i + 1));
-    }
-    for (int epoch = 0; epoch < 100; epoch++) {
-        std::cout << "epoch: " << epoch << '\n';
+    
+    GPT<float> model(device::GPU, 26, context, 128, 0);
+    SGD<float> opti(model.parameters(), 0.0022, 0.0001);
+    int trainLen = context;
+    for (int epoch = 0; epoch < 2000; epoch++) {
+        if (epoch == 500) opti.setLearningrate(0.00001);
+        if (epoch == 750) opti.setLearningrate(0.000001);
+        float total_loss = 0;
+        int num_examples = 0;
         for (int i = trainLen; i < trainInput.size() - 1; i++) {
             auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
             auto target = std::vector<TokenID>(trainInput.begin() + i - trainLen + 1, trainInput.begin() + i + 1);
             auto out = model.forward(dataset);
             auto loss = crossEntropyLoss(out, target);
-
-            loss.print();
-
-                
+            total_loss += loss(0, 0);
+            num_examples++;
             loss.backward();
-            auto params = model.parameters();
-            // for (auto& i : params) {
-            //     i -> gradient() -> print();
-            // }
             opti.step();
-            //opti.zeroGrad();
-            // auto ids = out.argMax();
-
-            // for (int i = trainLen; i < trainInput.size() - 1; i++) {
-            //     auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
-            //     std::cout << "Input: " << intToString(dataset) << '\n';
-            //     auto logits = model.forward(dataset);
-            //     std::cout << "Pred: " << intToString(logits.argMax()[0]) << "\n\n";
-            // }
-
+            opti.clearGrad();
+        }
+        if (epoch % 50 == 0) {
+            std::cout << "epoch: " << epoch << " avg loss: " << total_loss / num_examples << '\n';
         }
     }
-    
     std::cout << '\n';
     for (int i = trainLen; i < trainInput.size() - 1; i++) {
         auto dataset = std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i);
@@ -316,10 +308,10 @@ void ABCD2() {
         auto logits = model.forward(dataset);
         std::cout << "Pred: " << intToString(logits.argMax()[0]) << "\n\n";
     }
-    // auto dataset = std::vector<TokenID>(trainInput.begin(), trainInput.begin() + 1);
-    // std::cout << "Input: " << intToString(dataset) << '\n';
-    // auto logits = model.forward(dataset);
-    // std::cout << "Pred: " << intToString(logits.argMax()[0]) << "\n\n";
+    auto dataset = std::vector<TokenID>(trainInput.begin(), trainInput.begin() + 1);
+    std::cout << "Input: " << intToString(dataset) << '\n';
+    auto logits = model.forward(dataset);
+    std::cout << "Pred: " << intToString(logits.argMax()[0]) << "\n\n";
 }
 
 std::string readDataset(const std::string& filename) {
@@ -446,11 +438,12 @@ void tinyShake() {
     }
 
 }
-
 int main() {
     // tinyShake();
-    ABCD();
+    // simpleEmbeddingTest();
     // mnist();
+    // ABCD();
+    ABCD2();
 
     // tensor<float> mat(device::CPU, 3, 1, 100);
     // for (int i = 0; i < 3 * 100; i++) {

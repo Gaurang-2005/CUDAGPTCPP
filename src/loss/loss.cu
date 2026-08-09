@@ -42,7 +42,9 @@ template <typename t>
 tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<TokenID>& target) {
     if (logits.getShape()[0] != target.size()) throw std::invalid_argument("Prediction and target should have same batch size!");
     if (!logits.requiresGrad()) throw std::invalid_argument("LLM needs ");
+    logits.requiresGrad(false);
     auto maxes = logits.rowMax();
+    logits.requiresGrad(true);
     auto maxes2 = maxes;
 
     auto shifted = logits - std::move(maxes).batch(logits.getShape()[1], 1);      
@@ -82,7 +84,9 @@ tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<TokenID>& 
 template <typename t>
 tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<std::vector<TokenID>>& target) {
     if (logits.getShape()[0] != target.size()) throw std::invalid_argument("Prediction and target should have same batch size!");
+    logits.requiresGrad(false);
     auto maxes = logits.rowMax();
+    logits.requiresGrad(true);
     auto maxes2 = maxes;
     auto shifted = logits - std::move(maxes).batch(logits.getShape()[2], 1);     
     //shifted.print(); 

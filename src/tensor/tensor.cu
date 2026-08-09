@@ -1677,6 +1677,7 @@ __global__ void digitMultiplyKernel(t* out, t* in, size_t storageLength, t val) 
 
 template <typename t>
 tensor<t> tensor<t>::operator*(t val) const {
+    toGPU();
     tensor<t> out(device::GPU, shape);
     digitMultiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
     cudaDeviceSynchronize();
@@ -1702,6 +1703,7 @@ __global__ void digitDivideKernel(t* out, t* in, size_t storageLength, t val) {
 
 template <typename t>
 tensor<t> tensor<t>::operator/(t val) const {
+    toGPU();
     tensor<t> out(device::GPU, shape);
     digitDivideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
     cudaDeviceSynchronize();
@@ -2228,7 +2230,7 @@ __global__ void rowMax3DKernel(t* tens, t* out, size_t cols) {
 
 
 template <typename t>
-tensor<t> tensor<t>::rowMax() const {
+tensor<t> tensor<t>::rowMax() const & {
     toGPU();
 
     tensor<t> out;
@@ -2255,6 +2257,48 @@ tensor<t> tensor<t>::rowMax() const {
                     << '\n';
             std::abort();
         }
+    }
+    if (isGradEnabled && !isGradient) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<rowMaxNode<t>>(this);
+    }
+
+    return out;
+}
+
+template <typename t>
+tensor<t> tensor<t>::rowMax() && {
+    toGPU();
+
+    tensor<t> out;
+    if (shape.size() == 2) {
+        out = tensor<t>(device::GPU, shape[0], 1);
+        rowMaxKernel<<<shape[0], 256>>>(tens, out.tens, shape[1]);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 3) {
+        out = tensor<t>(device::GPU, shape[0], shape[1], 1);
+        rowMax3DKernel<<<dim3(shape[1], shape[0]), 256>>>(tens, out.tens, shape[2]);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    if (isGradEnabled && !isGradient) {
+        std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<rowMaxNode<t>>(first);
     }
 
     return out;

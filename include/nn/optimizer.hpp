@@ -75,6 +75,10 @@ public:
         t bias1 = 1 - std::pow(beta1, st);
         t bias2 = 1 - std::pow(beta2, st);
         for (size_t i = 0; i < this -> parameters.size(); i++) {   
+            if (!this->parameters[i]->gradient()) {
+                std::cout << "WARNING: param " << i << " has no gradient this step\n";
+                continue;
+            }            
             m[i].toGPU();
             v[i].toGPU();
             this -> parameters[i] -> requiresGrad(false);

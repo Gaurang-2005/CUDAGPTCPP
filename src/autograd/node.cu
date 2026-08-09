@@ -79,6 +79,9 @@ template class rowSumNode<double>;
 template class colSumNode<float>;
 template class colSumNode<double>;
 
+template class rowMaxNode<float>;
+template class rowMaxNode<double>;
+
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
     owner.gradient()->requiresGrad(false);
@@ -93,8 +96,8 @@ void addNode<t>::backward(const tensor<t>& owner) {
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
-    A -> clearGradientFunction();
-    B -> clearGradientFunction();
+    // A -> clearGradientFunction();
+    // B -> clearGradientFunction();
 }
 
 template <typename t>
@@ -111,8 +114,8 @@ void subtractNode<t>::backward(const tensor<t>& owner) {
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
-    A -> clearGradientFunction();
-    B -> clearGradientFunction();
+    // A -> clearGradientFunction();
+    // B -> clearGradientFunction();
 }
 
 template <typename t>
@@ -129,8 +132,8 @@ void multiplyNode<t>::backward(const tensor<t>& owner) {
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
-    A -> clearGradientFunction();
-    B -> clearGradientFunction();
+    // A -> clearGradientFunction();
+    // B -> clearGradientFunction();
 }
 
 template <typename t>
@@ -147,8 +150,8 @@ void divideNode<t>::backward(const tensor<t>& owner) {
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
-    A -> clearGradientFunction();
-    B -> clearGradientFunction();
+    // A -> clearGradientFunction();
+    // B -> clearGradientFunction();
 }
 
 template <typename t>
@@ -172,8 +175,8 @@ void matMulNode<t>::backward(const tensor<t>& owner) {
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     if (B -> gradientFunction()) B -> gradientFunction() -> backward(*B.get());
-    A -> clearGradientFunction();
-    B -> clearGradientFunction();
+    // A -> clearGradientFunction();
+    // B -> clearGradientFunction();
 }
 
 template <typename t>
@@ -185,7 +188,7 @@ void transposeNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -200,7 +203,7 @@ void sumNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -215,7 +218,7 @@ void meanNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
     
 template <typename t>
@@ -227,7 +230,7 @@ void reshapeNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -239,7 +242,7 @@ void expNode<t>::backward(const tensor<t>& owner) {
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -253,7 +256,7 @@ void logNode<t>::backward(const tensor<t>& owner) {
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -265,7 +268,7 @@ void powNode<t>::backward(const tensor<t>& owner) {
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -298,7 +301,7 @@ void reluNode<t>::backward(const tensor<t>& owner) {
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -314,7 +317,7 @@ void sigmoidNode<t>::backward(const tensor<t>& owner) {
     A -> requiresGrad(true);
     owner.requiresGrad(true);
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -331,7 +334,7 @@ void tanhNode<t>::backward(const tensor<t>& owner) {
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -370,7 +373,7 @@ void geluNode<t>::backward(const tensor<t>& owner) {
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -417,7 +420,7 @@ void softmaxNode<t>::backward(const tensor<t>& owner) {
     owner.requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -449,7 +452,7 @@ void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
     A-> requiresGrad(true);
 
     if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -472,7 +475,7 @@ void batchNode<t>::backward(const tensor<t>& owner) {
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -566,7 +569,7 @@ void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
     }
 
     if (weight -> gradientFunction()) weight -> gradientFunction() -> backward(*weight.get());
-    weight -> clearGradientFunction();
+    // weight -> clearGradientFunction();
 }
 
 template <typename t>
@@ -597,7 +600,7 @@ void positionEmbeddingNode<t>::backward(const tensor<t>& owner) {
     weight -> requiresGrad(true);
 
     if (weight -> gradientFunction()) weight -> gradientFunction() -> backward(*weight.get());
-    weight -> clearGradientFunction();
+    // weight -> clearGradientFunction();
 }
 
 template <typename t>
@@ -648,7 +651,7 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
     input->requiresGrad(true);
     score->clearGrad();
     if (input -> gradientFunction()) input -> gradientFunction() -> backward(*input.get());
-    input -> clearGradientFunction();
+    // input -> clearGradientFunction();
 }
 
 template <typename t>
@@ -721,7 +724,7 @@ void gatherNode<t>::backward(const tensor<t>& owner) {
     A-> requiresGrad(true);
 
     if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -737,7 +740,7 @@ void rowSumNode<t>::backward(const tensor<t>& owner) {
     A-> requiresGrad(true);
 
     if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
 }
 
 template <typename t>
@@ -753,5 +756,87 @@ void colSumNode<t>::backward(const tensor<t>& owner) {
     A-> requiresGrad(true);
 
     if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
-    A -> clearGradientFunction();
+    // A -> clearGradientFunction();
+}
+
+template <typename t>
+__global__ void rowMaxNodeKernel(t* grad, const t* ownerGrad, const TokenID* targ, const size_t storageLen, const size_t cols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx >= storageLen) return;
+
+    grad[targ[idx + blockIdx.y * storageLen] + idx * cols + blockIdx.y * storageLen * cols] = ownerGrad[idx + blockIdx.y * storageLen];
+}
+
+template <typename t>
+void rowMaxNode<t>::backward(const tensor<t>& owner) {
+    owner.gradient() -> requiresGrad(false);
+    A->requiresGrad(false);   
+    tensor<t> temp(device::GPU, A -> getShape());
+    temp.zeros();
+
+    owner.gradient()->toGPU();
+    cudaError_t err;
+    if(temp.getShape().size() == 2) {
+        TokenID* argVecG;
+        err = cudaMalloc(&argVecG, A->getShape()[0] * sizeof(TokenID));
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMalloc failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        auto vec = A->argMax();
+        std::vector<TokenID> argVec;
+        argVec.reserve(A->getShape()[0]);
+        for (auto& i : vec) {
+            for (auto& j : i) argVec.push_back(j);
+        }
+        err = cudaMemcpy(argVecG, argVec.data(), A->getShape()[0] * sizeof(TokenID), cudaMemcpyDefault);
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMemcpy failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        rowMaxNodeKernel<<<cuda::ceil_div(temp.getShape()[0], 256), 256>>>(temp.data(), owner.gradient()->data(), argVecG, temp.getShape()[0], temp.getShape()[1]);
+        err = cudaDeviceSynchronize();
+    }
+    else if(temp.getShape().size() == 3) {
+        TokenID* argVecG;
+        err = cudaMalloc(&argVecG, A->getShape()[0] * A->getShape()[1] * sizeof(TokenID));
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMalloc failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        auto vec = A->argMax();
+        std::vector<TokenID> argVec;
+        argVec.reserve(A->getShape()[0] * A->getShape()[1]);
+        for (auto& i : vec) {
+            for (auto& j : i) argVec.push_back(j);
+        }
+        err = cudaMemcpy(argVecG, argVec.data(), A->getShape()[0] * A->getShape()[1] * sizeof(TokenID), cudaMemcpyDefault);
+        if (err != cudaSuccess) {
+            std::cerr << "cudaMemcpy failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+        rowMaxNodeKernel<<<dim3(cuda::ceil_div(temp.getShape()[1], 256), temp.getShape()[0]), dim3(256, 1)>>>(temp.data(), owner.gradient()->data(), argVecG, temp.getShape()[1], A->getShape()[2]);
+        err = cudaDeviceSynchronize();
+    }
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+        std::abort();
+    }
+    if (A-> gradient()) *A-> gradient() += temp;
+    else A-> setGradient(std::make_shared<tensor<t>>(temp));
+    A-> requiresGrad(true);
+
+    if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
+    // A -> clearGradientFunction();
 }

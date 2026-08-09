@@ -814,7 +814,7 @@ void tensor<t>::print() const {
     }
     std::cout << "), device: "
               << (dev == device::CPU ? "CPU" : "GPU")
-              << '\n';
+              << "\n\n";
 
     if (shape.size() == 2) {
         for (size_t r = 0; r < shape[0]; ++r) {

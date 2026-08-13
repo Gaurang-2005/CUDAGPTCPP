@@ -352,19 +352,20 @@ public:
 
     void backward() {
         if (!isGradEnabled) throw std::invalid_argument("Gradient is not enabled on this tensor, so backward failed!");
+        gradFunction -> pass();
 
-
-        grad = std::make_shared<tensor<t>>(device::GPU, gradFunction -> shape());
+        grad = std::make_shared<tensor<t>>(device::GPU, shape);
         grad->ones();
-
         if (gradFunction) gradFunction -> backward(*this);
         clearGradientFunction();
     }
 
     tensor operator-() const;
 
-    tensor operator*(t val) const;
-    tensor operator/(t val) const ;
+    tensor operator*(t val) const &;
+    tensor operator/(t val) const &;
+    tensor operator*(t val) &&;
+    tensor operator/(t val) &&;
 
     tensor exp() const &;
     tensor exp() &&;
@@ -404,8 +405,10 @@ public:
     }
 
     std::vector<std::vector<TokenID>> argMax() const;
-    tensor<t> operator+(t val) const;
-    tensor<t> operator-(t val) const;
+    tensor<t> operator+(t val) const &;
+    tensor<t> operator-(t val) const &;
+    tensor<t> operator+(t val) &&;
+    tensor<t> operator-(t val) &&;
     tensor<t> batchSum() const;
     void printShape() {
         std::cout << "shape: ";

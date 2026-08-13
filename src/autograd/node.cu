@@ -4,6 +4,8 @@
 #include <iostream>
 #include <cuda/cmath>
 
+inline std::atomic<bool> debugGraph = false;
+
 template class addNode<float>;
 template class addNode<double>;
 
@@ -82,8 +84,23 @@ template class colSumNode<double>;
 template class rowMaxNode<float>;
 template class rowMaxNode<double>;
 
+template class scalarDivideNode<float>;
+template class scalarDivideNode<double>;
+
+template class scalarMultiplyNode<float>;
+template class scalarMultiplyNode<double>;
+
+template class scalarAddNode<float>;
+template class scalarAddNode<double>;
+
+template class scalarSubtractNode<float>;
+template class scalarSubtractNode<double>;
+
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "AddNode init!\n";
     owner.gradient()->requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
@@ -102,6 +119,10 @@ void addNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void subtractNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "subtractNode init!\n";
+    // if (A->DebugID() == 1) std::abort();
     owner.gradient()->requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
@@ -120,6 +141,9 @@ void subtractNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void multiplyNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "multiplyNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
@@ -138,6 +162,9 @@ void multiplyNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void divideNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "divideNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
@@ -156,10 +183,12 @@ void divideNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void matMulNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "matMulNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
-    // std::cout<<A->getShape()[0]<<' '<<A->getShape()[1]<<'\n';
     if (A -> gradient()) *A -> gradient() += (*owner.gradient()).matMul(B -> transposed());
     else A -> setGradient(std::make_shared<tensor<t>>((*owner.gradient()).matMul(B -> transposed())));
     if (B -> getShape().size() == A -> getShape().size()) {
@@ -181,6 +210,9 @@ void matMulNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void transposeNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "transposeNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += (*owner.gradient()).transposed();
@@ -193,6 +225,9 @@ void transposeNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void sumNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "sumNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     tensor<t> temp(device::GPU, A->getShape());
@@ -208,6 +243,9 @@ void sumNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void meanNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "meanNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     tensor<t> temp(device::GPU, A->getShape());
@@ -216,13 +254,16 @@ void meanNode<t>::backward(const tensor<t>& owner) {
     if (A -> gradient()) *A -> gradient() += temp;
     else A -> setGradient(std::make_shared<tensor<t>>(temp));
     A->requiresGrad(true);
-
+    owner.gradient()->toGPU();
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     // A -> clearGradientFunction();
 }
     
 template <typename t>
 void reshapeNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "reshapeNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += owner.gradient()->reshaped(oldShape);
@@ -235,6 +276,9 @@ void reshapeNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void expNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "expNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * A -> exp();
@@ -247,6 +291,9 @@ void expNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void logNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "logNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     tensor<t> temp(*A.get());
@@ -261,6 +308,9 @@ void logNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void powNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "powNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * A -> pow(power - 1) * power;
@@ -283,6 +333,9 @@ __global__ void reluGradKernel(const t* tens, t* out, size_t storageLength) {
 
 template <typename t>
 void reluNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "reluNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     tensor<t> temp(device::GPU, A->getShape());
@@ -306,6 +359,9 @@ void reluNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void sigmoidNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "sigmoidNode init!\n";
     owner.gradient() -> requiresGrad(false);
     owner.requiresGrad(false);
     A->requiresGrad(false);
@@ -322,6 +378,9 @@ void sigmoidNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void tanhNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "tanhNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     tensor<t> temp = A->tanh();
@@ -355,6 +414,9 @@ __global__ void geluGradKernel(const t* tens, t* out, size_t storageLength) {
 
 template <typename t>
 void geluNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "geluNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     tensor<t> temp(device::GPU, A->getShape());
@@ -388,8 +450,11 @@ __global__ void broadcastSubtractKernel(t* A, t* B, t* out, size_t row, size_t c
 
 template <typename t>
 void softmaxNode<t>::backward(const tensor<t>& owner) {
-    // std::cout << "Backward, A = " << A.get() << '\n';
-    // std::cout<<A->numElements()<<"run\n";
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "softmaxNode init!\n";
+    // std::cout << << "Backward, A = " << A.get() << '\n';
+    // std::cout <<<<A->numElements()<<"run\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     owner.requiresGrad(false);
@@ -434,6 +499,9 @@ __global__ void crossEntropyGradKernel(const t* pred, const t* targ, t* out, siz
 
 template <typename t>
 void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "crossEntropyLossNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     tensor<t> temp(device::GPU, A->getShape());
@@ -457,9 +525,12 @@ void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void batchNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "batchNode init!\n";
     A->requiresGrad(false);
     owner.gradient()->requiresGrad(false);
-    // std::cout << "batch Node: " << owner.DebugID() << ' ' << owner.gradient()->DebugID() << '\n';
+    // std::cout << << "batch Node: " << owner.DebugID() << ' ' << owner.gradient()->DebugID() << '\n';
     if (axis == 0) {    
         if (A -> gradient()) *A -> gradient() += owner.gradient()->colSum();
         else A -> setGradient(std::make_shared<tensor<t>>(owner.gradient()->colSum()));
@@ -490,6 +561,9 @@ __global__ void tokenEmbeddingNodeKernel(t* grad, const t* outGrad, const TokenI
 
 template <typename t>
 void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "tokenEmbeddingNode init!\n";
     owner.gradient() -> requiresGrad(false);
     if (!batched) {
         size_t len = tokenIds.size();
@@ -583,6 +657,9 @@ __global__ void positionEmbeddingNodeKernel(t* grad, const t* outGrad, const siz
 
 template <typename t>
 void positionEmbeddingNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "positionEmbeddingNode init!\n";
     owner.gradient() -> requiresGrad(false);
     weight->requiresGrad(false);
     if (!weight->gradient()) {
@@ -605,6 +682,9 @@ void positionEmbeddingNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "singleHeadAttentionNode init!\n";
     input->requiresGrad(false);
     owner.gradient()->requiresGrad(false);
     wQuery->requiresGrad(false);
@@ -623,6 +703,7 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
     }
     tensor<t> tempSoftGrad(device::GPU, score->getShape());
     softmaxNode<t> temp(&tempSoftGrad);
+    temp.cnt++;
     temp.backward(*score.get());
     score->requiresGrad(false);
     auto& softmaxGrad = *tempSoftGrad.gradient();
@@ -665,6 +746,9 @@ __global__ void scatterKernel(t* grad, const t* ownerGrad, const TokenID* targ, 
 
 template <typename t>
 void gatherNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "gatherNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     tensor<t> grad(device::GPU, A->getShape());
@@ -729,6 +813,9 @@ void gatherNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void rowSumNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "rowSumNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);   
     size_t colSize; 
@@ -745,6 +832,9 @@ void rowSumNode<t>::backward(const tensor<t>& owner) {
 
 template <typename t>
 void colSumNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "colSumNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);   
     size_t rowSize; 
@@ -770,6 +860,9 @@ __global__ void rowMaxNodeKernel(t* grad, const t* ownerGrad, const TokenID* tar
 
 template <typename t>
 void rowMaxNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "rowMaxNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);   
     tensor<t> temp(device::GPU, A -> getShape());
@@ -838,5 +931,65 @@ void rowMaxNode<t>::backward(const tensor<t>& owner) {
     A-> requiresGrad(true);
 
     if (A-> gradientFunction()) A-> gradientFunction() -> backward(*A.get());
+    // A -> clearGradientFunction();
+}
+
+template <typename t>
+void scalarDivideNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "scalarDivideNode init!\n";
+    owner.gradient() -> requiresGrad(false);
+    A->requiresGrad(false);
+    if (A -> gradient()) *A -> gradient() += *owner.gradient() / (sc);
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() / (sc)));
+    A->requiresGrad(true);
+
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    // A -> clearGradientFunction();
+}
+
+template <typename t>
+void scalarMultiplyNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "scalarMultiplyNode init!\n";
+    owner.gradient() -> requiresGrad(false);
+    A->requiresGrad(false);
+    if (A -> gradient()) *A -> gradient() += *owner.gradient() * (sc);
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (sc)));
+    A->requiresGrad(true);
+
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    // A -> clearGradientFunction();
+}
+
+template <typename t>
+void scalarAddNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "scalarAddNode init!\n";
+    owner.gradient() -> requiresGrad(false);
+    A->requiresGrad(false);
+    if (A -> gradient()) *A -> gradient() += *owner.gradient();
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+    A->requiresGrad(true);
+
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
+    // A -> clearGradientFunction();
+}
+
+template <typename t>
+void scalarSubtractNode<t>::backward(const tensor<t>& owner) {
+    this -> cnt--;
+    if (this -> cnt) return;
+    if (debugGraph) std::cout << "scalarSubtractNode init!\n";
+    owner.gradient() -> requiresGrad(false);
+    A->requiresGrad(false);
+    if (A -> gradient()) *A -> gradient() += *owner.gradient();
+    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+    A->requiresGrad(true);
+
+    if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     // A -> clearGradientFunction();
 }

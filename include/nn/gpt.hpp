@@ -12,7 +12,6 @@ class GPT {
     std::vector<transformerBlock<t>> blocks;
     layernorm<t> finalNorm;
     linear<t> lmHead;
-
 public:
     GPT(device dev, size_t vocabSize, size_t contextLength, size_t embedDim, size_t numLayers) : tokenEmb(dev, vocabSize, embedDim), posEmb(dev, contextLength, embedDim), finalNorm(dev, embedDim), lmHead(dev, vocabSize, embedDim) {
         blocks.reserve(numLayers);

@@ -61,6 +61,7 @@ tensor<t>::~tensor() {
     else if (dev == device::CPU) {
         delete[] tens;
     }
+    // if (debugID == 281) std::abort();
     tensorsDestroyed++;
     // std::cout << "Created: " << tensorsCreated
     //           << " Destroyed: " << tensorsDestroyed << '\n';
@@ -152,7 +153,6 @@ tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), stor
     other.isGradEnabled = false;
     other.grad = nullptr;
     other.gradFunction = nullptr;
-
     tensorsCreated++;
     // std::cout << "Created: " << tensorsCreated
     //           << " Destroyed: " << tensorsDestroyed << '\n';    
@@ -197,7 +197,7 @@ tensor<t>& tensor<t>::operator=(const tensor& other) {
 
 template <typename t>
 tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
-    if (gradFunction /*|| other.gradFunction*/) throw std::logic_error("Move Assignment of tensors participating in an autograd graph is not supported.");
+    if (gradFunction) throw std::logic_error("Move Assignment of tensors participating in an autograd graph is not supported.");
     if (this != &other) {
         if (dev == device::GPU) {
             if (tens) cudaFree(tens);
@@ -1667,7 +1667,7 @@ tensor<t> tensor<t>::log() && {
 }
 
 template <typename t>
-__global__ void digitMultiplyKernel(t* out, t* in, size_t storageLength, t val) {
+__global__ void scalarMultiplyKernel(t* out, t* in, size_t storageLength, t val) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (idx >= storageLength) return;
@@ -1676,10 +1676,10 @@ __global__ void digitMultiplyKernel(t* out, t* in, size_t storageLength, t val) 
 }
 
 template <typename t>
-tensor<t> tensor<t>::operator*(t val) const {
+tensor<t> tensor<t>::operator*(t val) const & {
     toGPU();
     tensor<t> out(device::GPU, shape);
-    digitMultiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
+    scalarMultiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1688,12 +1688,36 @@ tensor<t> tensor<t>::operator*(t val) const {
                 << '\n';
         std::abort();
     }
-
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<scalarMultiplyNode<t>>(this, val);
+    }
     return out;
 }
 
 template <typename t>
-__global__ void digitDivideKernel(t* out, t* in, size_t storageLength, t val) {
+tensor<t> tensor<t>::operator*(t val) && {
+    toGPU();
+    tensor<t> out(device::GPU, shape);
+    scalarMultiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+        std::abort();
+    }
+    if (isGradEnabled) {
+        std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<scalarMultiplyNode<t>>(first, val);
+    }
+    return out;
+}
+
+template <typename t>
+__global__ void scalarDivideKernel(t* out, t* in, size_t storageLength, t val) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (idx >= storageLength) return;
@@ -1702,10 +1726,10 @@ __global__ void digitDivideKernel(t* out, t* in, size_t storageLength, t val) {
 }
 
 template <typename t>
-tensor<t> tensor<t>::operator/(t val) const {
+tensor<t> tensor<t>::operator/(t val) const & {
     toGPU();
     tensor<t> out(device::GPU, shape);
-    digitDivideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
+    scalarDivideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -1714,7 +1738,31 @@ tensor<t> tensor<t>::operator/(t val) const {
                 << '\n';
         std::abort();
     }
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<scalarDivideNode<t>>(this, val);
+    }
+    return out;
+}
 
+template <typename t>
+tensor<t> tensor<t>::operator/(t val) && {
+    toGPU();
+    tensor<t> out(device::GPU, shape);
+    scalarDivideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+        std::abort();
+    }
+    if (isGradEnabled) {
+        std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<scalarDivideNode<t>>(first, val);
+    }
     return out;
 }
 
@@ -2017,7 +2065,6 @@ tensor<t> tensor<t>::rowSum() const & {
             std::abort();
         }
     }
-
     if (isGradEnabled) {
         out.isGradEnabled = true;
         out.gradFunction = std::make_shared<rowSumNode<t>>(this);
@@ -2736,7 +2783,7 @@ __global__ void digitAddKernel(t* out, t* in, size_t storageLength, t val) {
 }
 
 template <typename t>
-tensor<t> tensor<t>::operator+(t val) const {
+tensor<t> tensor<t>::operator+(t val) const & {
     tensor<t> out(device::GPU, shape);
     digitAddKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
     cudaDeviceSynchronize();
@@ -2747,7 +2794,30 @@ tensor<t> tensor<t>::operator+(t val) const {
                 << '\n';
         std::abort();
     }
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<scalarAddNode<t>>(this, val);
+    }
+    return out;
+}
 
+template <typename t>
+tensor<t> tensor<t>::operator+(t val) && {
+    tensor<t> out(device::GPU, shape);
+    digitAddKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+        std::abort();
+    }
+    if (isGradEnabled) {
+        std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<scalarAddNode<t>>(first, val);
+    }
     return out;
 }
 
@@ -2761,7 +2831,7 @@ __global__ void digitSubtractKernel(t* out, t* in, size_t storageLength, t val) 
 }
 
 template <typename t>
-tensor<t> tensor<t>::operator-(t val) const {
+tensor<t> tensor<t>::operator-(t val) const & {
     tensor<t> out(device::GPU, shape[0], shape[1]);
     digitSubtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
     cudaDeviceSynchronize();
@@ -2772,7 +2842,30 @@ tensor<t> tensor<t>::operator-(t val) const {
                 << '\n';
         std::abort();
     }
+    if (isGradEnabled) {
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<scalarSubtractNode<t>>(this, val);
+    }
+    return out;
+}
 
+template <typename t>
+tensor<t> tensor<t>::operator-(t val) && {
+    tensor<t> out(device::GPU, shape[0], shape[1]);
+    digitSubtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
+    cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: "
+                << cudaGetErrorString(err)
+                << '\n';
+        std::abort();
+    }
+    if (isGradEnabled) {
+        std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+        out.isGradEnabled = true;
+        out.gradFunction = std::make_shared<scalarSubtractNode<t>>(first, val);
+    }
     return out;
 }
 

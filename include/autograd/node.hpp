@@ -10,10 +10,12 @@ class tensor;
 template<typename t>
 class node {
 public:
+    int cnt = 0;
     virtual ~node() = default;
 
     virtual void backward(const tensor<t>& owner) = 0;
     virtual std::vector<size_t> shape() = 0;
+    virtual void pass() = 0;
 };
 
 template <typename t>
@@ -38,6 +40,13 @@ public:
     addNode(const tensor<t>* A, const std::shared_ptr<tensor<t>> B) : A(A), B(B) {}
     addNode(const std::shared_ptr<tensor<t>> A, const std::shared_ptr<tensor<t>> B) : A(A), B(B) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+            if (B -> gradientFunction()) B -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -51,6 +60,13 @@ public:
     subtractNode(const tensor<t>* A, const std::shared_ptr<tensor<t>> B) : A(A), B(B) {}
     subtractNode(const std::shared_ptr<tensor<t>> A, const std::shared_ptr<tensor<t>> B) : A(A), B(B) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+            if (B -> gradientFunction()) B -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -64,6 +80,13 @@ public:
     multiplyNode(const tensor<t>* A, const std::shared_ptr<tensor<t>> B) : A(A), B(B) {}
     multiplyNode(const std::shared_ptr<tensor<t>> A, const std::shared_ptr<tensor<t>> B) : A(A), B(B) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+            if (B -> gradientFunction()) B -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -77,6 +100,13 @@ public:
     divideNode(const tensor<t>* A, const std::shared_ptr<tensor<t>> B) : A(A), B(B) {}
     divideNode(const std::shared_ptr<tensor<t>> A, const std::shared_ptr<tensor<t>> B) : A(A), B(B) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+            if (B -> gradientFunction()) B -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -90,6 +120,13 @@ public:
     matMulNode(const tensor<t>* A, const std::shared_ptr<tensor<t>> B) : A(A), B(B) {}
     matMulNode(const std::shared_ptr<tensor<t>> A, const std::shared_ptr<tensor<t>> B) : A(A), B(B) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+            if (B -> gradientFunction()) B -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -100,6 +137,12 @@ public:
     transposeNode(const tensor<t>* A) : A(A) {}
     transposeNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -110,6 +153,12 @@ public:
     sumNode(const tensor<t>* A) : A(A) {}
     sumNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -121,6 +170,12 @@ public:
     meanNode(const tensor<t>* A) : A(A) {}
     meanNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -132,6 +187,12 @@ public:
     reshapeNode(const tensor<t>* A, std::vector<size_t> oldShape) : A(A), oldShape(oldShape) {}
     reshapeNode(const std::shared_ptr<tensor<t>> A, std::vector<size_t> oldShape) : A(A), oldShape(oldShape) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -142,6 +203,12 @@ public:
     expNode(const tensor<t>* A) : A(A) {}
     expNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -152,6 +219,12 @@ public:
     logNode(const tensor<t>* A) : A(A) {}
     logNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -163,6 +236,12 @@ public:
     powNode(const tensor<t>* A, t power) : A(A), power(power) {}
     powNode(const std::shared_ptr<tensor<t>> A, t power) : A(A), power(power) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -173,6 +252,12 @@ public:
     reluNode(const tensor<t>* A) : A(A) {}
     reluNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -183,6 +268,12 @@ public:
     sigmoidNode(const tensor<t>* A) : A(A) {}
     sigmoidNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -193,6 +284,12 @@ public:
     tanhNode(const tensor<t>* A) : A(A) {}
     tanhNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -203,6 +300,12 @@ public:
     geluNode(const tensor<t>* A) : A(A) {}
     geluNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 #include <iostream>
 template<typename t>
@@ -213,6 +316,12 @@ public:
     softmaxNode(const tensor<t>* A) : A(A) {}
     softmaxNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -223,6 +332,12 @@ public:
     std::vector<size_t> shape() override {return A->getShape();}
     crossEntropyLossNode(const tensor<t>* A, const tensor<t>* B) : A(A), B(B) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -234,6 +349,12 @@ public:
     batchNode(const tensor<t>* A, int axis) : A(A), axis(axis) {}
     batchNode(const std::shared_ptr<tensor<t>> A, int axis) : A(A), axis(axis) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -247,6 +368,12 @@ public:
     tokenEmbeddingNode(const tensor<t>* A, const std::vector<TokenID>& tokenIds) : weight(A), tokenIds(tokenIds), batched(false) {}
     tokenEmbeddingNode(const tensor<t>* A, const std::vector<std::vector<TokenID>>& tokenIds) : weight(A), batchedTokenIDs(tokenIds), batched(true) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (weight -> gradientFunction()) weight -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -257,6 +384,12 @@ public:
     std::vector<size_t> shape() override {return weight->getShape();}
     positionEmbeddingNode(const tensor<t>* A, const size_t len) : weight(A),  len(len) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (weight -> gradientFunction()) weight -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -274,6 +407,15 @@ public:
     singleHeadAttentionNode(const std::shared_ptr<tensor<t>> Q, const std::shared_ptr<tensor<t>> K, const std::shared_ptr<tensor<t>> V, const tensor<t>* input, const tensor<t>* wQuery, const tensor<t>* wKey, const tensor<t>* wVal, const std::shared_ptr<tensor<t>> score) : Q(Q),  K(K), V(V), input(input), wQuery(wQuery), wKey(wKey), wVal(wVal), score(score) {}
     singleHeadAttentionNode(const std::shared_ptr<tensor<t>> Q, const std::shared_ptr<tensor<t>> K, const std::shared_ptr<tensor<t>> V, const std::shared_ptr<tensor<t>> input, const tensor<t>* wQuery, const tensor<t>* wKey, const tensor<t>* wVal, const std::shared_ptr<tensor<t>> score) : Q(Q),  K(K), V(V), input(input), wQuery(wQuery), wKey(wKey), wVal(wVal), score(score) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (wQuery -> gradientFunction()) wQuery -> gradientFunction() -> pass();
+            if (wKey -> gradientFunction()) wKey -> gradientFunction() -> pass();
+            if (wVal -> gradientFunction()) wVal -> gradientFunction() -> pass();
+            if (input -> gradientFunction()) input -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -287,6 +429,12 @@ public:
     gatherNode(const tensor<t>* A, const std::vector<TokenID>* B) : A(A), B(B), batched(false) {}
     gatherNode(const tensor<t>* A, const std::vector<std::vector<TokenID>>* B) : A(A), batchedB(B), batched(true) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -297,6 +445,12 @@ public:
     rowSumNode(const tensor<t>* A) : A(A) {}
     rowSumNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -307,6 +461,12 @@ public:
     colSumNode(const tensor<t>* A) : A(A) {}
     colSumNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };
 
 template<typename t>
@@ -317,4 +477,78 @@ public:
     rowMaxNode(const tensor<t>* A) : A(A) {}
     rowMaxNode(const std::shared_ptr<tensor<t>> A) : A(A) {}
     virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
+};
+
+template<typename t>
+class scalarDivideNode : public node<t> {
+    const tensorRef<t> A;
+    const t sc;
+public:
+    std::vector<size_t> shape() override {return A->getShape();}
+    scalarDivideNode(const tensor<t>* A, const t sc) : A(A), sc(sc) {}
+    scalarDivideNode(const std::shared_ptr<tensor<t>> A, const t sc) : A(A), sc(sc) {}
+    virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
+};
+
+template<typename t>
+class scalarMultiplyNode : public node<t> {
+    const tensorRef<t> A;
+    const t sc;
+public:
+    std::vector<size_t> shape() override {return A->getShape();}
+    scalarMultiplyNode(const tensor<t>* A, const t sc) : A(A), sc(sc) {}
+    scalarMultiplyNode(const std::shared_ptr<tensor<t>> A, const t sc) : A(A), sc(sc) {}
+    virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
+};
+
+template<typename t>
+class scalarAddNode : public node<t> {
+    const tensorRef<t> A;
+    const t sc;
+public:
+    std::vector<size_t> shape() override {return A->getShape();}
+    scalarAddNode(const tensor<t>* A, const t sc) : A(A), sc(sc) {}
+    scalarAddNode(const std::shared_ptr<tensor<t>> A, const t sc) : A(A), sc(sc) {}
+    virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
+};
+
+template<typename t>
+class scalarSubtractNode : public node<t> {
+    const tensorRef<t> A;
+    const t sc;
+public:
+    std::vector<size_t> shape() override {return A->getShape();}
+    scalarSubtractNode(const tensor<t>* A, const t sc) : A(A), sc(sc) {}
+    scalarSubtractNode(const std::shared_ptr<tensor<t>> A, const t sc) : A(A), sc(sc) {}
+    virtual void backward(const tensor<t>& owner) override;
+    virtual void pass() override {
+        this -> cnt++;
+        if (this -> cnt == 1) {                
+            if (A -> gradientFunction()) A -> gradientFunction() -> pass();
+        }
+    }
 };

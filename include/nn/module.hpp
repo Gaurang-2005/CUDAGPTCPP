@@ -118,16 +118,14 @@ template <typename t>
 class layernorm : public module<t> {
     tensor<t> gamma;
     tensor<t> beta;
-    tensor<t> epsilon;
+    t epsilon;
 public:
-    layernorm(device dev, size_t inputs, t eps = t(1e-5)) : gamma(dev, 1, inputs), beta(dev, 1, inputs), epsilon(dev, 1, 1) {
+    layernorm(device dev, size_t inputs, t eps = t(1e-5)) : gamma(dev, 1, inputs), beta(dev, 1, inputs), epsilon(eps) {
         gamma.ones();
         beta.zeros();
-        epsilon.fill(eps);
 
         gamma.requiresGrad(true);
         beta.requiresGrad(true);
-        epsilon.requiresGrad(false);
     }
 
     tensor<t> forward(const tensor<t>& input) override {
@@ -137,17 +135,17 @@ public:
             auto centcpy = centered;
             auto var = std::move(centcpy).pow(2).rowSum() / input.getShape()[1];
             auto varShape = var.getShape();
-            auto std = (std::move(var) + epsilon.batch(varShape[0], 0)).batch(centered.getShape()[1], 1).pow(-0.5);
+            auto std = (std::move(var) + epsilon).batch(centered.getShape()[1], 1).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
             auto normShape = norm.getShape();
-            out = norm * gamma.batch(normShape[0], 0) + beta.batch(normShape[0], 0);
+            out = std::move(norm) * gamma.batch(normShape[0], 0) + beta.batch(normShape[0], 0);
         }
         else if (input.getShape().size() == 3) {
             auto centered = input - (input.rowSum() / input.getShape()[2]).batch(input.getShape()[2], 1);
             auto centcpy = centered;
             auto var = std::move(centcpy).pow(2).rowSum() / input.getShape()[2];
             auto varShape = var.getShape();
-            auto std = (std::move(var) + epsilon.batch(varShape[1], 0).batch(varShape[0], 2)).batch(centered.getShape()[2], 1).pow(-0.5);
+            auto std = (std::move(var) + epsilon).batch(centered.getShape()[2], 1).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
             auto normShape = norm.getShape();
             out = std::move(norm) * gamma.batch(normShape[1], 0).batch(normShape[0], 2) + beta.batch(normShape[1], 0).batch(normShape[0], 2);
@@ -166,7 +164,7 @@ public:
             auto cent2 = centered;
             auto var = std::move(cent2).pow(2).rowSum() / inShape[1];
             auto varShape = var.getShape();
-            auto std = (std::move(var) + epsilon.batch(varShape[0], 0)).batch(centered.getShape()[1], 1).pow(-0.5);
+            auto std = (std::move(var) + epsilon).batch(centered.getShape()[1], 1).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
             auto normShape = norm.getShape();
             out = std::move(norm) * gamma.batch(normShape[0], 0) + beta.batch(normShape[0], 0);
@@ -180,7 +178,7 @@ public:
             auto varShape = var.getShape();
             // auto tempsh = epsilon.batch(varShape[1], 0).batch(varShape[0], 2).batch(centered.getShape()[2], 1).batch(centered.getShape()[0], 2).pow(-0.5).getShape();
             // std::cout << inShape[2]<<'\n'<<tempsh[0] << ' ' << tempsh[1] << ' '<< tempsh[2]<<std::endl;
-            auto std = (std::move(var) + epsilon.batch(varShape[1], 0).batch(varShape[0], 2)).batch(centered.getShape()[2], 1).pow(-0.5);
+            auto std = (std::move(var) + epsilon).batch(centered.getShape()[2], 1).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
             auto normShape = norm.getShape();
             out = std::move(norm) * gamma.batch(normShape[1], 0).batch(normShape[0], 2) + beta.batch(normShape[1], 0).batch(normShape[0], 2);

@@ -65,6 +65,7 @@ tensor<t> tokenEmbedding<t>::forward(const std::vector<std::vector<TokenID>>& in
     if (!input.size()) throw std::invalid_argument("Input is empty!");
     size_t batchSize = input.size();
     size_t len = input[0].size();
+    if (batchSize == 1) return tokenEmbedding<t>::forward(input[0]);
     tensor<t> out(device::GPU, batchSize, len, weight.getShape()[1]);
     TokenID* temp;
     cudaError_t err = cudaMalloc(&temp, len * batchSize * sizeof(TokenID));

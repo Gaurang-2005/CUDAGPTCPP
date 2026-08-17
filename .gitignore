@@ -91,7 +91,7 @@ Thumbs.db
 # Generated datasets/checkpoints
 # =========================
 checkpoints/
-datasets/
+# datasets/
 outputs/
 logs/
 tokenizerSave/

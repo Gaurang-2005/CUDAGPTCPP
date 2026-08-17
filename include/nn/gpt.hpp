@@ -4,6 +4,7 @@
 #include "nn/module.hpp"
 #include "tokenizer/types.hpp"
 #include <vector>
+#include <fstream> 
 
 template <typename t>
 class GPT {
@@ -51,5 +52,137 @@ public:
         out.push_back(lmHead.parameters()[0]);
         out.push_back(lmHead.parameters()[1]);
         return out;
+    }
+    void save(const std::string& filename) {
+        std::ofstream file(filename, std::ios::binary);
+
+        if (!file) {
+            throw std::runtime_error("Could not open model file for writing: " + filename);
+        }
+
+        // Magic number / file identifier
+        const char magic[] = "CUDAGPT";
+        file.write(magic, sizeof(magic));
+
+        // Number of parameters
+        uint64_t numParams = parameters().size();
+        file.write(reinterpret_cast<const char*>(&numParams),
+                sizeof(numParams));
+
+        for (auto& param : parameters()) {
+
+            // Save shape
+            const auto& shape = param->getShape();
+
+            uint64_t ndim = shape.size();
+            file.write(reinterpret_cast<const char*>(&ndim),
+                    sizeof(ndim));
+
+            for (auto dim : shape) {
+                uint64_t d = dim;
+                file.write(reinterpret_cast<const char*>(&d),
+                        sizeof(d));
+            }
+
+            // Make sure data is on CPU before accessing it
+            param->toCPU();
+
+            uint64_t numElements = 1;
+            for (auto dim : shape)
+                numElements *= dim;
+
+            file.write(
+                reinterpret_cast<const char*>(param->data()),
+                numElements * sizeof(t)
+            );
+
+            // Put parameter back on GPU
+            param->toGPU();
+        }
+
+        file.close();
+
+        if (!file) {
+            throw std::runtime_error("Error while writing model file.");
+        }
+    }
+    void load(const std::string& filename) {
+        std::ifstream file(filename, std::ios::binary);
+
+        if (!file) {
+            throw std::runtime_error("Could not open model file: " + filename);
+        }
+
+        // Check magic number
+        char magic[sizeof("CUDAGPT")];
+        file.read(magic, sizeof(magic));
+
+        if (std::string(magic) != "CUDAGPT") {
+            throw std::runtime_error("Invalid CUDA-GPT model file.");
+        }
+
+        uint64_t numParams;
+        file.read(reinterpret_cast<char*>(&numParams),
+                sizeof(numParams));
+
+        if (numParams != parameters().size()) {
+            throw std::runtime_error(
+                "Parameter count mismatch. "
+                "Saved model: " + std::to_string(numParams) +
+                ", current model: " + std::to_string(parameters().size())
+            );
+        }
+
+        for (size_t i = 0; i < numParams; ++i) {
+
+            auto param = parameters()[i];
+
+            // Read shape
+            uint64_t ndim;
+            file.read(reinterpret_cast<char*>(&ndim),
+                    sizeof(ndim));
+
+            std::vector<size_t> savedShape(ndim);
+
+            for (uint64_t j = 0; j < ndim; ++j) {
+                uint64_t dim;
+                file.read(reinterpret_cast<char*>(&dim),
+                        sizeof(dim));
+
+                savedShape[j] = dim;
+            }
+
+            // Verify shape
+            if (savedShape != param->getShape()) {
+                throw std::runtime_error(
+                    "Shape mismatch for parameter " +
+                    std::to_string(i)
+                );
+            }
+
+            uint64_t numElements = 1;
+
+            for (auto dim : savedShape)
+                numElements *= dim;
+
+            // Read into CPU tensor
+            param->toCPU();
+
+            file.read(
+                reinterpret_cast<char*>(param->data()),
+                numElements * sizeof(t)
+            );
+
+            if (!file) {
+                throw std::runtime_error(
+                    "Unexpected end of model file."
+                );
+            }
+
+            // Move trained weights back to GPU
+            param->toGPU();
+        }
+
+        file.close();
     }
 };

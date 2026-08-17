@@ -15,6 +15,7 @@ add_executable(CUDA-GPT
     src/autograd/node.cu
     src/nn/module.cu
     src/loss/loss.cu
+    src/memoryManager/memoryManager.cu
 )
 
 target_include_directories(CUDA-GPT PRIVATE

@@ -18,11 +18,14 @@ public:
 
     void zeroGrad() {
         for (auto& i : parameters) {
-            i -> gradient() -> zeros();
+            if (i -> gradient()) i -> gradient() -> zeros();
         }
     }
     void clearGrad() {
-        for (auto& i : parameters) i -> clearGrad();
+        for (auto& i : parameters) {
+            i -> clearGrad();
+            i -> clearGradientFunction();
+        }
     }
 };
 

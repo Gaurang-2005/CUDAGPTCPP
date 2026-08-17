@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 #include <cuda/cmath>
 #include <curand_kernel.h>
+#include "memoryManager/memoryManager.hpp"
 
 template class tensor<float>;
 template class tensor<double>;
@@ -22,6 +23,7 @@ void tensor<t>::constructorAllocate() {
 template <typename t>
 void tensor<t>::toGPU() const {
     if (dev == device::GPU) {
+        memoryManager::get().registerTensor(&ref);
         return; 
     }
     t* tempgpuData = nullptr;
@@ -39,6 +41,7 @@ void tensor<t>::toGPU() const {
     }
     dev = device::GPU;
     tens = tempgpuData;
+    memoryManager::get().registerTensor(&ref);
 }
 
 template <typename t>
@@ -51,6 +54,7 @@ void tensor<t>::toCPU() const {
     cudaFree(tens);
     tens = tempcpuData;
     dev = device::CPU;
+    memoryManager::get().unregisterTensor(&ref);
 }
 
 template <typename t>
@@ -63,13 +67,12 @@ tensor<t>::~tensor() {
     }
     // if (debugID == 281) std::abort();
     tensorsDestroyed++;
-    // std::cout << "Created: " << tensorsCreated
-    //           << " Destroyed: " << tensorsDestroyed << '\n';
     if (debugTensorDeath) std::cout<<"tensor killed with debugID: "<<debugID<<std::endl;
+    debugLeak();
 }
 
 template <typename t>
-tensor<t>::tensor(device dev, std::initializer_list<std::initializer_list<t>> list) : dev(dev), debugID(++id) {
+tensor<t>::tensor(device dev, std::initializer_list<std::initializer_list<t>> list) : dev(dev), debugID(++id), ref(this) {
     shape.push_back(list.size());
     shape.push_back(list.begin()->size());
     for (auto& i : shape) {
@@ -107,13 +110,12 @@ tensor<t>::tensor(device dev, std::initializer_list<std::initializer_list<t>> li
     }
 
     tensorsCreated++;
-    // std::cout << "Created: " << tensorsCreated
-    //           << " Destroyed: " << tensorsDestroyed << '\n';  
     addDebugId();
+    debugLeak();
 }
 
 template <typename t>
-tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other.storageLength), dev(other.dev), debugID(++id) {
+tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other.storageLength), dev(other.dev), debugID(++id), ref(this) {
     if (dev == device::CPU) {
         tens = new t[storageLength];
         std::copy(other.tens, other.tens + storageLength, tens);
@@ -141,10 +143,11 @@ tensor<t>::tensor(const tensor& other) : shape(other.shape), storageLength(other
     // std::cout << "Created: " << tensorsCreated
     //           << " Destroyed: " << tensorsDestroyed << '\n';   
     addDebugId();
+    debugLeak();
 }
 
 template <typename t>
-tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), storageLength(other.storageLength), tens(other.tens), dev(other.dev), debugID(++id) {
+tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), storageLength(other.storageLength), tens(other.tens), dev(other.dev), debugID(++id), ref(this) {
     other.tens = nullptr;
     other.storageLength = 0;
     isGradEnabled = other.isGradEnabled;
@@ -155,8 +158,10 @@ tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), stor
     other.gradFunction = nullptr;
     tensorsCreated++;
     // std::cout << "Created: " << tensorsCreated
-    //           << " Destroyed: " << tensorsDestroyed << '\n';    
+    //           << " Destroyed: " << tensorsDestroyed << '\n';   
+    memoryManager::get().unregisterTensor(&other.ref); 
     addDebugId();
+    debugLeak();
 }
 
 template <typename t>
@@ -191,6 +196,8 @@ tensor<t>& tensor<t>::operator=(const tensor& other) {
             }
             cudaMemcpy(tens, other.tens, storageLength * sizeof(t), cudaMemcpyDeviceToDevice);
         }
+        if (dev == device::GPU) memoryManager::get().registerTensor(&ref); 
+        else memoryManager::get().unregisterTensor(&ref); 
     }
     return *this;
 }
@@ -220,6 +227,9 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
         other.isGradEnabled = false;
         other.grad = nullptr;
         other.gradFunction = nullptr;
+        if (dev == device::GPU) memoryManager::get().registerTensor(&ref); 
+        else memoryManager::get().unregisterTensor(&ref); 
+        memoryManager::get().unregisterTensor(&other.ref); 
     }
     return *this;
 }
@@ -262,9 +272,7 @@ __global__ void randomKernel(size_t storageLength, t* tens) {
 
 template <typename t>
 void tensor<t>::random() {
-    if (dev == device::CPU) {
-        toGPU();
-    }
+    toGPU();
     randomKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens);
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -1491,10 +1499,9 @@ __global__ void negateKernel(t* tens, size_t storageLength) {
 }
 template <typename t>
 tensor<t> tensor<t>::operator-() const {
+    toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-
-    temp.toGPU();
 
     negateKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(temp.tens, storageLength);
     cudaDeviceSynchronize();
@@ -1519,6 +1526,7 @@ __global__ void expKernel(t* out, t* in, size_t storageLength) {
 
 template <typename t>
 tensor<t> tensor<t>::exp() const & {
+    toGPU();
     tensor<t> out(device::GPU, shape);
     expKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength);
     cudaDeviceSynchronize();
@@ -1540,6 +1548,7 @@ tensor<t> tensor<t>::exp() const & {
 
 template <typename t>
 tensor<t> tensor<t>::exp() && {
+    toGPU();
     tensor<t> out(device::GPU, shape);
     expKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength);
     cudaDeviceSynchronize();
@@ -1625,6 +1634,7 @@ __global__ void logKernel(t* out, t* in, size_t storageLength) {
 
 template <typename t>
 tensor<t> tensor<t>::log() const & {
+    toGPU();
     tensor<t> out(device::GPU, shape);
     logKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength);
     cudaDeviceSynchronize();
@@ -1646,6 +1656,7 @@ tensor<t> tensor<t>::log() const & {
 
 template <typename t>
 tensor<t> tensor<t>::log() && {
+    toGPU();
     tensor<t> out(device::GPU, shape);
     logKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength);
     cudaDeviceSynchronize();
@@ -2784,6 +2795,7 @@ __global__ void digitAddKernel(t* out, t* in, size_t storageLength, t val) {
 
 template <typename t>
 tensor<t> tensor<t>::operator+(t val) const & {
+    toGPU();
     tensor<t> out(device::GPU, shape);
     digitAddKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
     cudaDeviceSynchronize();
@@ -2803,6 +2815,7 @@ tensor<t> tensor<t>::operator+(t val) const & {
 
 template <typename t>
 tensor<t> tensor<t>::operator+(t val) && {
+    toGPU();
     tensor<t> out(device::GPU, shape);
     digitAddKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
     cudaDeviceSynchronize();
@@ -2832,7 +2845,8 @@ __global__ void digitSubtractKernel(t* out, t* in, size_t storageLength, t val) 
 
 template <typename t>
 tensor<t> tensor<t>::operator-(t val) const & {
-    tensor<t> out(device::GPU, shape[0], shape[1]);
+    toGPU();
+    tensor<t> out(device::GPU, shape);
     digitSubtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -2851,7 +2865,8 @@ tensor<t> tensor<t>::operator-(t val) const & {
 
 template <typename t>
 tensor<t> tensor<t>::operator-(t val) && {
-    tensor<t> out(device::GPU, shape[0], shape[1]);
+    toGPU();
+    tensor<t> out(device::GPU, shape);
     digitSubtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -2903,4 +2918,21 @@ tensor<t> tensor<t>::batchSum() const {
         std::abort();
     }
     return out;
+}
+tensorMem::tensorMem(tensor<float>* ptr) : refF(ptr) {
+    if (On && ptr -> getDevice() == device::GPU) memoryManager::get().registerTensor(this);
+}  
+tensorMem::tensorMem(tensor<double>* ptr): refD(ptr) {
+    if (On && ptr -> getDevice() == device::GPU) memoryManager::get().registerTensor(this);
+}
+void tensorMem::toCPU() {
+    if (refF) refF -> toCPU();
+    else refD -> toCPU();
+}
+void tensorMem::toGPU() {
+    if (refF) refF -> toGPU();
+    else refD -> toGPU();
+}
+tensorMem::~tensorMem() {
+    if (On) memoryManager::get().unregisterTensor(this);
 }

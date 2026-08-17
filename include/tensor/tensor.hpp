@@ -15,7 +15,20 @@ enum class device {
 inline std::atomic<size_t> tensorsCreated = 0;
 inline std::atomic<size_t> tensorsDestroyed = 0;
 inline bool debugTensorDeath = false;
+inline bool DebugLeak = false;
 inline std::atomic<size_t> id = 0;
+
+class tensorMem {
+    const bool On = false;
+    const tensor<float>* refF = nullptr;
+    const tensor<double>* refD = nullptr;
+public:
+    tensorMem(tensor<float>* ptr);  
+    tensorMem(tensor<double>* ptr);
+    void toCPU();
+    void toGPU();
+    ~tensorMem();
+};
 
 template <typename t>
 class tensor {
@@ -29,10 +42,11 @@ class tensor {
     bool isIdentity = false;
     size_t debugID;
     bool isGradient = false;
+    mutable tensorMem ref; 
 public:
     template <typename ... Args>
     requires (std::integral<Args> && ...)
-    tensor(device dev, Args...args) : shape({static_cast<size_t>(args)...}), dev(dev), debugID(++id) {
+    tensor(device dev, Args...args) : shape({static_cast<size_t>(args)...}), dev(dev), debugID(++id), ref(this) {
 
         for (auto& i : shape) {
             storageLength*=i;
@@ -45,10 +59,9 @@ public:
         }
         tensorsCreated++;
         addDebugId();
-        // std::cout << "Created: " << tensorsCreated
-        //         << " Destroyed: " << tensorsDestroyed << '\n';
+        debugLeak();
     }
-    tensor(device dev, const std::vector<size_t>& shape) : shape(shape), dev(dev), debugID(++id) {
+    tensor(device dev, const std::vector<size_t>& shape) : shape(shape), dev(dev), debugID(++id), ref(this) {
 
         for (auto& i : shape) {
             storageLength*=i;
@@ -61,8 +74,13 @@ public:
         }
         tensorsCreated++;
         addDebugId();
-        // std::cout << "Created: " << tensorsCreated
-        //         << " Destroyed: " << tensorsDestroyed << '\n';
+        debugLeak();
+    }
+    void debugLeak() {
+        if (DebugLeak) {
+        std::cout << "Created: " << tensorsCreated
+                << " Destroyed: " << tensorsDestroyed << '\n';
+        }
     }
     size_t DebugID() const {return debugID;}
     void addDebugId() {
@@ -357,7 +375,6 @@ public:
         grad = std::make_shared<tensor<t>>(device::GPU, shape);
         grad->ones();
         if (gradFunction) gradFunction -> backward(*this);
-        clearGradientFunction();
     }
 
     tensor operator-() const;

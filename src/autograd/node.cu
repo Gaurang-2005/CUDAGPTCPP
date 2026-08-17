@@ -4,7 +4,7 @@
 #include <iostream>
 #include <cuda/cmath>
 
-inline std::atomic<bool> debugGraph = false;
+inline bool debugGraph = false;
 
 template class addNode<float>;
 template class addNode<double>;
@@ -420,6 +420,7 @@ void geluNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     tensor<t> temp(device::GPU, A->getShape());
+    A -> toGPU();
     geluGradKernel<<<cuda::ceil_div(temp.numElements(), 256), 256>>>(A->data(),temp.data(), temp.numElements());
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -429,11 +430,11 @@ void geluNode<t>::backward(const tensor<t>& owner) {
                 << '\n';
         std::abort();
     }
-    
+    A -> toCPU();
     if (A -> gradient()) *A -> gradient() += *owner.gradient() * temp;
     else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * temp));
     A -> requiresGrad(true);
-
+    owner.gradient() -> toCPU();
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
     // A -> clearGradientFunction();
 }

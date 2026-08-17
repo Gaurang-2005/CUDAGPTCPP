@@ -216,7 +216,7 @@ void ABCD() {
         inputDat.push_back(std::vector<TokenID>(trainInput.begin() + i - trainLen, trainInput.begin() + i));
         targDat.push_back(std::vector<TokenID>(trainInput.begin() + i - trainLen + 1, trainInput.begin() + i + 1));
     }
-    for (int epoch = 0; epoch < 100; epoch++) {
+    for (int epoch = 0; epoch < 1000; epoch++) {
         std::cout << "epoch: " << epoch << " loss: ";
         auto out = model.forward(inputDat);
         auto loss = crossEntropyLoss(out, targDat);
@@ -326,15 +326,52 @@ std::vector<std::vector<TokenID>> readBatchedInput(const std::string& filename) 
     return inputDoc;
 }
 
+float validationLoss(
+    GPT<float>& model,
+    const std::vector<std::vector<TokenID>>& valInput,
+    const std::vector<std::vector<TokenID>>& valTarget,
+    size_t batchSize
+) {
+    std::cout << "valSize: " << valInput.size() << '\n';
+    float totalLoss = 0.0f;
+    size_t numBatches = 0;
+
+    for (size_t start = 0;
+         start + batchSize <= valInput.size();
+         start += batchSize) {
+
+        std::vector<std::vector<TokenID>> in(
+            valInput.begin() + start,
+            valInput.begin() + start + batchSize
+        );
+
+        std::vector<std::vector<TokenID>> target(
+            valTarget.begin() + start,
+            valTarget.begin() + start + batchSize
+        );
+
+        auto out = model.forward(in);
+
+        auto loss = crossEntropyLoss<float>(out, target);
+
+        // loss is a (1,1) tensor in your implementation
+        loss.toCPU();
+        totalLoss += loss.data()[0];
+
+        ++numBatches;
+    }
+
+    return totalLoss / numBatches;
+}
+#include <chrono>
 void tinyShake() {
-    std::string trainText = readDataset("datasets/tiny shakespeare/train.csv");
+    // std::string trainText = readDataset("datasets/tiny shakespeare/train.csv");
     BPE<float> tokenizer(4096);
     // std::vector<std::string> doc;
     // doc.push_back(trainText);
-
     // tokenizer.train(doc);
-    // tokenizer.save("tokenizerSave/tinyShakespeare/token.bin");
-    tokenizer.load("tokenizerSave/tinyShakespeare/token.bin");   
+    // tokenizer.save("datasets/tiny shakespeare/token.bin");
+    tokenizer.load("datasets/tiny shakespeare/token.bin");   
     // std::ofstream inputOut("tempSave/input.bin", std::ios::binary);
     // if (inputOut) {
     //     inputOut.write(reinterpret_cast<char*>(&input), sizeof(input));
@@ -348,36 +385,160 @@ void tinyShake() {
     //     inputDoc.emplace_back(input.begin() + i - context, input.begin() + i);
     //     targetDoc.emplace_back(input.begin() + i - context + 1, input.begin() + i + 1);
     // }
-    // saveBatchedInput("tokenizerSave/tinyShakespeare/input.bin", inputDoc);
-    // saveBatchedInput("tokenizerSave/tinyShakespeare/target.bin", targetDoc);
-    inputDoc = readBatchedInput("tokenizerSave/tinyShakespeare/input.bin");
-    targetDoc = readBatchedInput("tokenizerSave/tinyShakespeare/target.bin");
-    // batchSize = inputDoc.size();
+    // saveBatchedInput("datasets/tiny shakespeare/input.bin", inputDoc);
+    // saveBatchedInput("datasets/tiny shakespeare/target.bin", targetDoc);
+    inputDoc = readBatchedInput("datasets/tiny shakespeare/input.bin");
+    targetDoc = readBatchedInput("datasets/tiny shakespeare/target.bin");
+    batchSize = inputDoc.size();
     // for (int i = 0; i < inputDoc.size(); ++i) {
     //     for (int j = 0; j < inputDoc[i].size(); ++j) {
     //         std::cout << inputDoc[i][j] << ' ';
     //     }
     //     std::cout << std::endl;
     // }
-
     GPT<float> model(device::GPU, (4096), context, 384, 2);
-    Adam<float> opti(model.parameters(), 0.00001);
-    batchSize = 1;
-    for (int i = 0; i < 10000; i++) {
+    Adam<float> opti(model.parameters(), 0.001);
+    batchSize = 128;
+    std::vector<std::vector<TokenID>> validationInput;
+    std::vector<std::vector<TokenID>> validationTarget;
+    // std::cout << "test token size: " << testTokens.size() << '\n';
+    // for (size_t i = 0; i + context < testTokens.size(); ++i) {
+    //     testInput.emplace_back(
+    //         testTokens.begin() + i,
+    //         testTokens.begin() + i + context
+    //     );
+
+    //     testTarget.emplace_back(
+    //         testTokens.begin() + i + 1,
+    //         testTokens.begin() + i + context + 1
+    //     );
+    // }
+    bool achieved = false;
+    validationInput = readBatchedInput("datasets/tiny shakespeare/validationInput.bin");
+    validationTarget = readBatchedInput("datasets/tiny shakespeare/validationTarget.bin");
+    for (int i = 0; i < 100; i++) {
         std::cout << "epoch: " << i <<'\n';
-        auto in = std::vector<std::vector<TokenID>>(inputDoc.begin(), inputDoc.begin() + batchSize);
-        auto out = model.forward(in[0]);
-        auto targ = std::vector<std::vector<TokenID>>(targetDoc.begin(), targetDoc.begin() + batchSize);
-        auto loss = crossEntropyLoss<float>(out, targ[0]);
-        loss.print();
-        loss.backward();
-        opti.step();
-        auto outVec = out.argMax();
-        for (int i = 0; i < 1; i++) {
-            std::cout << "expected: " << tokenizer.decode(std::vector<TokenID>(targetDoc[i].begin(), targetDoc[i].begin() + context / 8 + 1)) << "\nOutput: " << tokenizer.decode(model.forward(std::vector<TokenID>(inputDoc[i].begin(), inputDoc[i].begin() + context / 8)).argMax()[0]) <<"\n\n"; 
+        int temp = 0;
+        size_t remain = (inputDoc.end() - inputDoc.begin()) / batchSize;
+        int valcnt = 0;
+        for (auto batch = 0; batch < inputDoc.size() - batchSize; batch += batchSize) {
+            {
+                // std::cout << "live Tensors: " << tensorsCreated - tensorsDestroyed << '\n';
+                // while (temp) {}
+                // temp++;
+                std::cout << "Data left: " << remain-- << '\n';
+                auto in = std::vector<std::vector<TokenID>>(inputDoc.begin() + batch, inputDoc.begin() + batch + batchSize);
+                auto out = model.forward(in);
+                auto targ = std::vector<std::vector<TokenID>>(targetDoc.begin() + batch, targetDoc.begin() + batch + batchSize);
+                auto loss = crossEntropyLoss<float>(out, targ);
+                // auto start = std::chrono::steady_clock::now();
+                loss.backward();
+                // auto end = std::chrono::steady_clock::now();
+                // auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+                // std::cout << "Execution time: " << elapsed.count() << " ms" << std::endl;
+                opti.step();
+                opti.clearGrad();
+                loss.clearGradientFunction();
+                if (!(valcnt % 500)) loss.print();
+
+
+                // auto out2 = model.forward(in);
+                // auto predictions = out2.argMax();
+                // int total = 0;
+                // int correct = 0;
+                // for (size_t b = 0; b < predictions.size(); ++b) {
+                //     for (size_t t = 0; t < predictions[b].size(); ++t) {
+
+                //         if (predictions[b][t] == targ[b][t])
+                //             ++correct;
+
+                //         ++total;
+                //     }
+                // }
+                // float accuracy =
+                //     static_cast<float>(correct) / static_cast<float>(total);
+
+                // std::cout << "Test accuracy: "
+                //         << accuracy * 100.0f
+                //         << "%\n";
+
+
+            }
+            if ((valcnt == 0)) {
+                auto valLoss = validationLoss(model, validationInput, validationTarget, batchSize);
+                std::cout << "Validation: " << valLoss << '\n';
+                if (valLoss < 2) {
+                    achieved = true;
+                    break;
+                }
+            }
+            valcnt++; 
         }
+        if (achieved) break;
+    }
+    model.save("datasets/tiny shakespeare/model.bin");
+
+    std::vector<std::vector<TokenID>> testInput;
+    std::vector<std::vector<TokenID>> testTarget;
+
+    std::string testText =
+        readDataset("datasets/tiny shakespeare/test.csv");
+
+    std::vector<TokenID> testTokens =
+        tokenizer.encode(testText);
+
+    for (size_t i = 0; i + context < testTokens.size(); ++i) {
+
+        testInput.emplace_back(
+            testTokens.begin() + i,
+            testTokens.begin() + i + context
+        );
+
+        testTarget.emplace_back(
+            testTokens.begin() + i + 1,
+            testTokens.begin() + i + context + 1
+        );
     }
 
+    size_t correct = 0;
+    size_t total = 0;
+
+    for (size_t i = 0; i < testInput.size(); i += batchSize) {
+
+        size_t currentBatchSize =
+            std::min(batchSize, testInput.size() - i);
+
+        std::vector<std::vector<TokenID>> in(
+            testInput.begin() + i,
+            testInput.begin() + i + currentBatchSize
+        );
+
+        std::vector<std::vector<TokenID>> target(
+            testTarget.begin() + i,
+            testTarget.begin() + i + currentBatchSize
+        );
+
+        auto out = model.forward(in);
+        auto predictions = out.argMax();
+
+        for (size_t b = 0; b < predictions.size(); ++b) {
+            for (size_t t = 0; t < predictions[b].size(); ++t) {
+
+                if (predictions[b][t] == target[b][t])
+                    ++correct;
+
+                ++total;
+            }
+        }
+        break;
+    }
+
+    float accuracy =
+        static_cast<float>(correct) / static_cast<float>(total);
+
+    std::cout << "Test accuracy: "
+            << accuracy * 100.0f
+            << "%\n";
 }
 
 
@@ -457,6 +618,7 @@ void tinyShake() {
 //     std::cout << "Pred: " << intToString(logits.argMax()[0]) << "\n\n";
 // }
 int main() {
-    ABCD();
+    tinyShake();
 }
+
 

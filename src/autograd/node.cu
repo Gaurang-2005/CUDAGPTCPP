@@ -104,10 +104,56 @@ void addNode<t>::backward(const tensor<t>& owner) {
     owner.gradient()->requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += *owner.gradient();
-    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
-    if (B -> gradient()) *B -> gradient() += *owner.gradient();
-    else B -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+    if (A -> getShape() == B -> getShape()) {
+        if (A -> gradient()) *A -> gradient() += *owner.gradient();
+        else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+        if (B -> gradient()) *B -> gradient() += *owner.gradient();
+        else B -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+    }
+    else if (A -> getShape().size() == 2) {
+        if (B -> getShape()[1] == 1 && A -> getShape()[0] == B -> getShape()[0]) {
+            if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
+            else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
+            if (B -> gradient()) *B -> gradient() += owner.gradient() -> rowSum();
+            else B -> setGradient(std::make_shared<tensor<t>>(owner.gradient() -> rowSum()));
+        }
+        else if (B -> getShape()[0] == 1 && A -> getShape()[1] == B -> getShape()[1]) {
+            if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
+            else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
+            if (B -> gradient()) *B -> gradient() += owner.gradient() -> colSum();
+            else B -> setGradient(std::make_shared<tensor<t>>(owner.gradient() -> colSum()));
+        }
+    }
+    else if (A -> getShape().size() == 3) {
+        if (B -> getShape().size() == 2) {
+            if (B -> getShape()[1] == 1 && A -> getShape()[1] == B -> getShape()[0]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient();
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+                if (B -> gradient()) *B -> gradient() += owner.gradient() -> rowSum().batchSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(owner.gradient() -> rowSum().batchSum()));
+            }
+            else if (B -> getShape()[0] == 1 && A -> getShape()[2] == B -> getShape()[1]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient();
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+                if (B -> gradient()) *B -> gradient() += owner.gradient() -> colSum().batchSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(owner.gradient() -> colSum().batchSum()));
+            }
+        } 
+        else if (B -> getShape().size() == 3) {
+            if (B -> getShape()[2] == 1 && A -> getShape()[1] == B -> getShape()[1]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient();
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+                if (B -> gradient()) *B -> gradient() += owner.gradient() -> rowSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(owner.gradient() -> rowSum()));
+            }
+            else if (B -> getShape()[1] == 1 && A -> getShape()[2] == B -> getShape()[2]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient();
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+                if (B -> gradient()) *B -> gradient() += owner.gradient() -> colSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(owner.gradient() -> colSum()));
+            }
+        }
+    }
     A->requiresGrad(true);
     B->requiresGrad(true);
 
@@ -126,10 +172,56 @@ void subtractNode<t>::backward(const tensor<t>& owner) {
     owner.gradient()->requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += *owner.gradient();
-    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
-    if (B -> gradient()) *B -> gradient() -= *owner.gradient();
-    else B -> setGradient(std::make_shared<tensor<t>>(-*owner.gradient()));
+    if (A -> getShape() == B -> getShape()) {
+        if (A -> gradient()) *A -> gradient() += *owner.gradient();
+        else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+        if (B -> gradient()) *B -> gradient() -= *owner.gradient();
+        else B -> setGradient(std::make_shared<tensor<t>>(-*owner.gradient()));
+    }
+    else if (A -> getShape().size() == 2) {
+        if (B -> getShape()[1] == 1 && A -> getShape()[0] == B -> getShape()[0]) {
+            if (A -> gradient()) *A -> gradient() += *owner.gradient();
+            else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+            if (B -> gradient()) *B -> gradient() -= owner.gradient() -> rowSum();
+            else B -> setGradient(std::make_shared<tensor<t>>(-owner.gradient() -> rowSum()));
+        }
+        else if (B -> getShape()[0] == 1 && A -> getShape()[1] == B -> getShape()[1]) {
+            if (A -> gradient()) *A -> gradient() += *owner.gradient();
+            else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+            if (B -> gradient()) *B -> gradient() -= owner.gradient() -> colSum();
+            else B -> setGradient(std::make_shared<tensor<t>>(-owner.gradient() -> colSum()));
+        }
+    }
+    else if (A -> getShape().size() == 3) {
+        if (B -> getShape().size() == 2) {
+            if (B -> getShape()[1] == 1 && A -> getShape()[1] == B -> getShape()[0]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient();
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+                if (B -> gradient()) *B -> gradient() -= owner.gradient() -> rowSum().batchSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(-owner.gradient() -> rowSum().batchSum()));
+            }
+            else if (B -> getShape()[0] == 1 && A -> getShape()[2] == B -> getShape()[1]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient();
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+                if (B -> gradient()) *B -> gradient() -= owner.gradient() -> colSum().batchSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(-owner.gradient() -> colSum().batchSum()));
+            }
+        } 
+        else if (B -> getShape().size() == 3) {
+            if (B -> getShape()[2] == 1 && A -> getShape()[1] == B -> getShape()[1]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient();
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+                if (B -> gradient()) *B -> gradient() -= owner.gradient() -> rowSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(-owner.gradient() -> rowSum()));
+            }
+            else if (B -> getShape()[1] == 1 && A -> getShape()[2] == B -> getShape()[2]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient();
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient()));
+                if (B -> gradient()) *B -> gradient() -= owner.gradient() -> colSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(-owner.gradient() -> colSum()));
+            }
+        }
+    }
     A->requiresGrad(true);
     B->requiresGrad(true);
 
@@ -147,10 +239,56 @@ void multiplyNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
-    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
-    if (B -> gradient()) *B -> gradient() += *owner.gradient() * (*A.get());
-    else B -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*A.get())));
+    if (A -> getShape() == B -> getShape()) {
+        if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
+        else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
+        if (B -> gradient()) *B -> gradient() += *owner.gradient() * (*A.get());
+        else B -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*A.get())));
+    }
+    else if (A -> getShape().size() == 2) {
+        if (B -> getShape()[1] == 1 && A -> getShape()[0] == B -> getShape()[0]) {
+            if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
+            else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
+            if (B -> gradient()) *B -> gradient() += (*owner.gradient() * *A.get()).rowSum();
+            else B -> setGradient(std::make_shared<tensor<t>>((*owner.gradient() * *A.get()).rowSum()));
+        }
+        else if (B -> getShape()[0] == 1 && A -> getShape()[1] == B -> getShape()[1]) {
+            if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
+            else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
+            if (B -> gradient()) *B -> gradient() += (*owner.gradient() * *A.get()).colSum();
+            else B -> setGradient(std::make_shared<tensor<t>>((*owner.gradient() * *A.get()).colSum()));
+        }
+    }
+    else if (A -> getShape().size() == 3) {
+        if (B -> getShape().size() == 2) {
+            if (B -> getShape()[1] == 1 && A -> getShape()[1] == B -> getShape()[0]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
+                if (B -> gradient()) *B -> gradient() += (*owner.gradient() * *A.get()).rowSum().batchSum();
+                else B -> setGradient(std::make_shared<tensor<t>>((*owner.gradient() * *A.get()).rowSum().batchSum()));
+            }
+            else if (B -> getShape()[0] == 1 && A -> getShape()[2] == B -> getShape()[1]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
+                if (B -> gradient()) *B -> gradient() += (*owner.gradient() * *A.get()).colSum().batchSum();
+                else B -> setGradient(std::make_shared<tensor<t>>((*owner.gradient() * *A.get()).colSum().batchSum()));
+            }
+        } 
+        else if (B -> getShape().size() == 3) {
+            if (B -> getShape()[2] == 1 && A -> getShape()[1] == B -> getShape()[1]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
+                if (B -> gradient()) *B -> gradient() += (*owner.gradient() * *A.get()).rowSum();
+                else B -> setGradient(std::make_shared<tensor<t>>((*owner.gradient() * *A.get()).rowSum()));
+            }
+            else if (B -> getShape()[1] == 1 && A -> getShape()[2] == B -> getShape()[2]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient() * (*B.get());
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() * (*B.get())));
+                if (B -> gradient()) *B -> gradient() += (*owner.gradient() * *A.get()).colSum();
+                else B -> setGradient(std::make_shared<tensor<t>>((*owner.gradient() * *A.get()).colSum()));
+            }
+        }
+    }
     A->requiresGrad(true);
     B->requiresGrad(true);
 
@@ -168,10 +306,56 @@ void divideNode<t>::backward(const tensor<t>& owner) {
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
     B->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B.get());
-    else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() / (*B.get())));
-    if (B -> gradient()) *B -> gradient() -= (*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()));
-    else B -> setGradient(std::make_shared<tensor<t>>(-(*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))));
+    if (A -> getShape() == B -> getShape()) {
+        if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B.get());
+        else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() / (*B.get())));
+        if (B -> gradient()) *B -> gradient() -= ((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get())));
+        else B -> setGradient(std::make_shared<tensor<t>>(-((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get())))));
+    }
+    else if (A -> getShape().size() == 2) {
+        if (B -> getShape()[1] == 1 && A -> getShape()[0] == B -> getShape()[0]) {
+            if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B.get());
+            else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() / (*B.get())));
+            if (B -> gradient()) *B -> gradient() -= ((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).rowSum();
+            else B -> setGradient(std::make_shared<tensor<t>>(-((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).rowSum()));
+        }
+        else if (B -> getShape()[0] == 1 && A -> getShape()[1] == B -> getShape()[1]) {
+            if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B.get());
+            else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() / (*B.get())));
+            if (B -> gradient()) *B -> gradient() -= ((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).colSum();
+            else B -> setGradient(std::make_shared<tensor<t>>(-((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).colSum()));
+        }
+    }
+    else if (A -> getShape().size() == 3) {
+        if (B -> getShape().size() == 2) {
+            if (B -> getShape()[1] == 1 && A -> getShape()[1] == B -> getShape()[0]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B.get());
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() / (*B.get())));
+                if (B -> gradient()) *B -> gradient() -= ((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).rowSum().batchSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(-((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).rowSum().batchSum()));
+            }
+            else if (B -> getShape()[0] == 1 && A -> getShape()[2] == B -> getShape()[1]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B.get());
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() / (*B.get())));
+                if (B -> gradient()) *B -> gradient() -= ((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).colSum().batchSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(-((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).colSum().batchSum()));
+            }
+        } 
+        else if (B -> getShape().size() == 3) {
+            if (B -> getShape()[2] == 1 && A -> getShape()[1] == B -> getShape()[1]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B.get());
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() / (*B.get())));
+                if (B -> gradient()) *B -> gradient() -= ((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).rowSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(-((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).rowSum()));
+            }
+            else if (B -> getShape()[1] == 1 && A -> getShape()[2] == B -> getShape()[2]) {
+                if (A -> gradient()) *A -> gradient() += *owner.gradient() / (*B.get());
+                else A -> setGradient(std::make_shared<tensor<t>>(*owner.gradient() / (*B.get())));
+                if (B -> gradient()) *B -> gradient() -= ((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).colSum();
+                else B -> setGradient(std::make_shared<tensor<t>>(-((*owner.gradient() * (*A.get()))/((*B.get())*(*B.get()))).colSum()));
+            }
+        }
+    }
     A->requiresGrad(true);
     B->requiresGrad(true);
 

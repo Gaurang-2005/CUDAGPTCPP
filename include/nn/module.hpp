@@ -28,11 +28,11 @@ public:
     tensor<t> forward(const tensor<t>& input) override {
         if (input.rank() == 2) {
             assert(input.getShape()[1] == weights.getShape()[0]);
-            return input.matMul(weights) + bias.batch(input.getShape()[0], 0);
+            return input.matMul(weights) + bias;
         }
         else if (input.rank() == 3) {
             assert(input.getShape()[2] == weights.getShape()[0]);
-            return input.matMul(weights) + bias.batch(input.getShape()[1], 0).batch(input.getShape()[0], 2);
+            return input.matMul(weights) + bias;
         }
         else {
             throw std::invalid_argument("linear only supports rank-2 and rank-3 tensors");
@@ -43,11 +43,11 @@ public:
         size_t sh2 = input.getShape()[1];
         if (input.rank() == 2) {
             assert(input.getShape()[1] == weights.getShape()[0]);
-            return std::move(input).matMul(weights) + bias.batch(sh1, 0);
+            return std::move(input).matMul(weights) + bias;
         }
         else if (input.rank() == 3) {
             assert(input.getShape()[2] == weights.getShape()[0]);
-            return std::move(input).matMul(weights) + bias.batch(sh2, 0).batch(sh1, 2);
+            return std::move(input).matMul(weights) + bias;
         }
         else {
             throw std::invalid_argument("linear only supports rank-2 and rank-3 tensors");
@@ -131,24 +131,24 @@ public:
     tensor<t> forward(const tensor<t>& input) override {
         tensor<t> out;
         if (input.getShape().size() == 2) {
-            auto centered = input - (input.rowSum() / input.getShape()[1]).batch(input.getShape()[1], 1);
+            auto centered = input - (input.rowSum() / input.getShape()[1]);
             auto centcpy = centered;
             auto var = std::move(centcpy).pow(2).rowSum() / input.getShape()[1];
             auto varShape = var.getShape();
-            auto std = (std::move(var) + epsilon).batch(centered.getShape()[1], 1).pow(-0.5);
+            auto std = (std::move(var) + epsilon).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
             auto normShape = norm.getShape();
-            out = std::move(norm) * gamma.batch(normShape[0], 0) + beta.batch(normShape[0], 0);
+            out = std::move(norm) * gamma + beta;
         }
         else if (input.getShape().size() == 3) {
-            auto centered = input - (input.rowSum() / input.getShape()[2]).batch(input.getShape()[2], 1);
+            auto centered = input - (input.rowSum() / input.getShape()[2]);
             auto centcpy = centered;
             auto var = std::move(centcpy).pow(2).rowSum() / input.getShape()[2];
             auto varShape = var.getShape();
-            auto std = (std::move(var) + epsilon).batch(centered.getShape()[2], 1).pow(-0.5);
+            auto std = (std::move(var) + epsilon).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
             auto normShape = norm.getShape();
-            out = std::move(norm) * gamma.batch(normShape[1], 0).batch(normShape[0], 2) + beta.batch(normShape[1], 0).batch(normShape[0], 2);
+            out = std::move(norm) * gamma + beta;
         }
         else {
             throw std::invalid_argument("LayerNorm only supports rank-2 and rank-3 tensors.");
@@ -160,28 +160,26 @@ public:
         if (input.getShape().size() == 2) {
             auto inShape = input.getShape();
             auto input1 = input;
-            auto centered = std::move(input1) - (std::move(input).rowSum() / inShape[1]).batch(inShape[1], 1);
+            auto centered = std::move(input1) - (std::move(input).rowSum() / inShape[1]);
             auto cent2 = centered;
             auto var = std::move(cent2).pow(2).rowSum() / inShape[1];
             auto varShape = var.getShape();
-            auto std = (std::move(var) + epsilon).batch(centered.getShape()[1], 1).pow(-0.5);
+            auto std = (std::move(var) + epsilon).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
             auto normShape = norm.getShape();
-            out = std::move(norm) * gamma.batch(normShape[0], 0) + beta.batch(normShape[0], 0);
+            out = std::move(norm) * gamma + beta;
         }
         else if (input.getShape().size() == 3) {
             auto inShape = input.getShape();
             auto input1 = input;
-            auto centered = std::move(input1) - (std::move(input).rowSum() / inShape[2]).batch(inShape[2], 1);
+            auto centered = std::move(input1) - (std::move(input).rowSum() / inShape[2]);
             auto cent2 = centered;
             auto var = std::move(cent2).pow(2).rowSum() / inShape[2];
             auto varShape = var.getShape();
-            // auto tempsh = epsilon.batch(varShape[1], 0).batch(varShape[0], 2).batch(centered.getShape()[2], 1).batch(centered.getShape()[0], 2).pow(-0.5).getShape();
-            // std::cout << inShape[2]<<'\n'<<tempsh[0] << ' ' << tempsh[1] << ' '<< tempsh[2]<<std::endl;
-            auto std = (std::move(var) + epsilon).batch(centered.getShape()[2], 1).pow(-0.5);
+            auto std = (std::move(var) + epsilon).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
             auto normShape = norm.getShape();
-            out = std::move(norm) * gamma.batch(normShape[1], 0).batch(normShape[0], 2) + beta.batch(normShape[1], 0).batch(normShape[0], 2);
+            out = std::move(norm) * gamma + beta;
         }
         else {
             throw std::invalid_argument("LayerNorm only supports rank-2 and rank-3 tensors.");
@@ -253,9 +251,9 @@ public:
             V = std::make_shared<tensor<t>>(input.matMul(wVal));
         }
         else if (input.getShape().size() == 3) {
-            Q = std::make_shared<tensor<t>>(input.matMul(wQuery.batch(input.getShape()[0], 2)));
-            K = std::make_shared<tensor<t>>(input.matMul(wKey.batch(input.getShape()[0], 2)));
-            V = std::make_shared<tensor<t>>(input.matMul(wVal.batch(input.getShape()[0], 2)));
+            Q = std::make_shared<tensor<t>>(input.matMul(wQuery));
+            K = std::make_shared<tensor<t>>(input.matMul(wKey));
+            V = std::make_shared<tensor<t>>(input.matMul(wVal));
         }
         else throw std::invalid_argument("Attention only supports 2D or 3D");
         wQuery.requiresGrad(true);
@@ -280,9 +278,9 @@ public:
             V = std::make_shared<tensor<t>>(input.matMul(wVal));
         }
         else if (input.getShape().size() == 3) {
-            Q = std::make_shared<tensor<t>>(input.matMul(wQuery.batch(input.getShape()[0], 2)));
-            K = std::make_shared<tensor<t>>(input.matMul(wKey.batch(input.getShape()[0], 2)));
-            V = std::make_shared<tensor<t>>(input.matMul(wVal.batch(input.getShape()[0], 2)));
+            Q = std::make_shared<tensor<t>>(input.matMul(wQuery));
+            K = std::make_shared<tensor<t>>(input.matMul(wKey));
+            V = std::make_shared<tensor<t>>(input.matMul(wVal));
         }
         else throw std::invalid_argument("Attention only supports 2D or 3D");
         wQuery.requiresGrad(true);

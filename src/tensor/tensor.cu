@@ -294,6 +294,42 @@ __global__ void addKernel(size_t storageLength, t* tensA, t* tensB) {
 }
 
 template <typename t>
+__global__ void broadcastAdd1Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] += tensB[idx / tensACols];
+    }
+}
+
+template <typename t>
+__global__ void broadcastAdd2Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] += tensB[idx % tensACols];
+    }
+}
+
+template <typename t>
+__global__ void broadcastAdd3Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols, size_t tensARows) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] += tensB[idx / tensACols + blockIdx.y * tensARows];
+    }
+}
+
+template <typename t>
+__global__ void broadcastAdd4Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] += tensB[idx % tensACols + blockIdx.y * tensACols];
+    }
+}
+
+template <typename t>
 __global__ void subtractKernel(size_t storageLength, t* tensA, t* tensB) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -303,25 +339,144 @@ __global__ void subtractKernel(size_t storageLength, t* tensA, t* tensB) {
 }
 
 template <typename t>
+__global__ void broadcastSubtract1Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] -= tensB[idx / tensACols];
+    }
+}
+
+template <typename t>
+__global__ void broadcastSubtract2Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] -= tensB[idx % tensACols];
+    }
+}
+
+template <typename t>
+__global__ void broadcastSubtract3Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols, size_t tensARows) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] -= tensB[idx / tensACols + blockIdx.y * tensARows];
+    }
+}
+
+template <typename t>
+__global__ void broadcastSubtract4Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] -= tensB[idx % tensACols + blockIdx.y * tensACols];
+    }
+}
+
+template <typename t>
 tensor<t> tensor<t>::operator+(const tensor& other) const & {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for addition.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this + other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
     }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastAdd1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastAdd2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastAdd1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastAdd3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastAdd2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastAdd4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+
+
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         temp.gradFunction = std::make_shared<addNode<t>>(this, &other);
         temp.isGradEnabled = true;
@@ -331,22 +486,106 @@ tensor<t> tensor<t>::operator+(const tensor& other) const & {
 
 template <typename t>
 tensor<t> tensor<t>::operator+(const tensor<t>& other) && {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for addition.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this + other.tens[0];
     }
     toGPU();
     other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
     }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastAdd1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastAdd2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastAdd1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastAdd3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastAdd2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastAdd4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
         temp.gradFunction = std::make_shared<addNode<t>>(first, &other);
@@ -357,22 +596,106 @@ tensor<t> tensor<t>::operator+(const tensor<t>& other) && {
 
 template <typename t>
 tensor<t> tensor<t>::operator+(tensor<t>&& other) const & {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for addition.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this + other.tens[0];
     }
     toGPU();
     other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
     }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastAdd1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastAdd2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastAdd1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastAdd3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastAdd2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastAdd4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
         temp.gradFunction = std::make_shared<addNode<t>>(this, second);
@@ -383,22 +706,106 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) const & {
 
 template <typename t>
 tensor<t> tensor<t>::operator+(tensor<t>&& other) && {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for addition.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this + other.tens[0];
     }
     toGPU();
     other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
     }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastAdd1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastAdd2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastAdd1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastAdd3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastAdd2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastAdd4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -415,26 +822,109 @@ tensor<t>& tensor<t>::operator+=(const tensor& other) {
     *this = *this + other;
     return *this;
 }
+
 template <typename t>
 tensor<t> tensor<t>::operator-(const tensor& other) const & {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for subtraction.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this - other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
     }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastSubtract1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastSubtract2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastSubtract1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastSubtract3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastSubtract2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastSubtract4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         temp.gradFunction = std::make_shared<subtractNode<t>>(this, &other);
         temp.isGradEnabled = true;
@@ -444,23 +934,104 @@ tensor<t> tensor<t>::operator-(const tensor& other) const & {
 
 template <typename t>
 tensor<t> tensor<t>::operator-(const tensor& other) && {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for subtraction.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this - other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastSubtract1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastSubtract2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastSubtract1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastSubtract3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastSubtract2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastSubtract4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -472,23 +1043,104 @@ tensor<t> tensor<t>::operator-(const tensor& other) && {
 
 template <typename t>
 tensor<t> tensor<t>::operator-(tensor&& other) const & {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for subtraction.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this - other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastSubtract1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastSubtract2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastSubtract1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastSubtract3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastSubtract2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastSubtract4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -500,23 +1152,104 @@ tensor<t> tensor<t>::operator-(tensor&& other) const & {
 
 template <typename t>
 tensor<t> tensor<t>::operator-(tensor&& other) && {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for subtraction.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this - other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastSubtract1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastSubtract2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastSubtract1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastSubtract3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastSubtract2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastSubtract4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -544,25 +1277,141 @@ __global__ void multiplyKernel(size_t storageLength, t* tensA, t* tensB) {
 }
 
 template <typename t>
+__global__ void broadcastMultiply1Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] *= tensB[idx / tensACols];
+    }
+}
+
+template <typename t>
+__global__ void broadcastMultiply2Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] *= tensB[idx % tensACols];
+    }
+}
+
+template <typename t>
+__global__ void broadcastMultiply3Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols, size_t tensARows) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] *= tensB[idx / tensACols + blockIdx.y * tensARows];
+    }
+}
+
+template <typename t>
+__global__ void broadcastMultiply4Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] *= tensB[idx % tensACols + blockIdx.y * tensACols];
+    }
+}
+
+template <typename t>
 tensor<t> tensor<t>::operator*(const tensor& other) const & {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for multiplication.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this * other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    temp.gradFunction = nullptr;
-    multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastMultiply1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastMultiply2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastMultiply1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastMultiply3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastMultiply2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastMultiply4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         temp.gradFunction = std::make_shared<multiplyNode<t>>(this, &other);
@@ -573,24 +1422,104 @@ tensor<t> tensor<t>::operator*(const tensor& other) const & {
 
 template <typename t>
 tensor<t> tensor<t>::operator*(const tensor& other) && {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for multiplication.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this * other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    temp.gradFunction = nullptr;
-    multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastMultiply1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastMultiply2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastMultiply1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastMultiply3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastMultiply2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastMultiply4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -602,24 +1531,104 @@ tensor<t> tensor<t>::operator*(const tensor& other) && {
 
 template <typename t>
 tensor<t> tensor<t>::operator*(tensor&& other) const & {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for multiplication.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this * other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    temp.gradFunction = nullptr;
-    multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastMultiply1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastMultiply2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastMultiply1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastMultiply3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastMultiply2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastMultiply4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -631,24 +1640,104 @@ tensor<t> tensor<t>::operator*(tensor&& other) const & {
 
 template <typename t>
 tensor<t> tensor<t>::operator*(tensor&& other) && {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for multiplication.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this * other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    temp.gradFunction = nullptr;
-    multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastMultiply1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastMultiply2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastMultiply1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastMultiply3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastMultiply2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastMultiply4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -676,24 +1765,141 @@ __global__ void divideKernel(size_t storageLength, t* tensA, t* tensB) {
 }
 
 template <typename t>
+__global__ void broadcastDivide1Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] /= tensB[idx / tensACols];
+    }
+}
+
+template <typename t>
+__global__ void broadcastDivide2Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] /= tensB[idx % tensACols];
+    }
+}
+
+template <typename t>
+__global__ void broadcastDivide3Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols, size_t tensARows) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] /= tensB[idx / tensACols + blockIdx.y * tensARows];
+    }
+}
+
+template <typename t>
+__global__ void broadcastDivide4Kernel(size_t storageLength, t* tensA, t* tensB, size_t tensACols) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < storageLength) {
+        tensA[idx + blockIdx.y * storageLength] /= tensB[idx % tensACols + blockIdx.y * tensACols];
+    }
+}
+
+template <typename t>
 tensor<t> tensor<t>::operator/(const tensor& other) const & {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for division.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this / other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastDivide1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastDivide2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastDivide1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastDivide3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastDivide2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastDivide4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         temp.gradFunction = std::make_shared<divideNode<t>>(this, &other);
@@ -704,23 +1910,104 @@ tensor<t> tensor<t>::operator/(const tensor& other) const & {
 
 template <typename t>
 tensor<t> tensor<t>::operator/(const tensor& other) && {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for division.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this / other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastDivide1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastDivide2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastDivide1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastDivide3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastDivide2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastDivide4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -732,23 +2019,104 @@ tensor<t> tensor<t>::operator/(const tensor& other) && {
 
 template <typename t>
 tensor<t> tensor<t>::operator/(tensor&& other) const & {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for division.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this / other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastDivide1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastDivide2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastDivide1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastDivide3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastDivide2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastDivide4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -760,23 +2128,104 @@ tensor<t> tensor<t>::operator/(tensor&& other) const & {
 
 template <typename t>
 tensor<t> tensor<t>::operator/(tensor&& other) && {
-    if (shape != other.shape){
-        throw std::invalid_argument("Tensors must have the same shape for division.");
+    if (other.shape.size() == 2 && other.shape[0] == 1 && other.shape[1] == 1) {
+        other.toCPU();
+        return *this / other.tens[0];
     }
-    if (dev == device::CPU || other.dev == device::CPU) {
-        toGPU();
-        other.toGPU();
-    }
+    toGPU();
+    other.toGPU();
     tensor<t> temp(*this);
     temp.setGradient(nullptr);
-    divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-    cudaDeviceSynchronize();
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        std::cerr << "Kernel launch failed: "
-                << cudaGetErrorString(err)
-                << '\n';
-        std::abort();
+    if (shape == other.shape) {
+        divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
+        cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
+    }
+    else if (shape.size() == 2) {
+        if (other.shape.size() != 2) {
+            throw std::invalid_argument("if operand A dimension is 2 then operand B should also have dim 2.");
+        }
+        if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
+            broadcastDivide1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
+            broadcastDivide2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
+    }
+    else {
+        if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
+            broadcastDivide1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
+            broadcastDivide3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+            
+        }
+        else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
+            broadcastDivide2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
+            broadcastDivide4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
+            cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
+        }
+        else {
+            throw std::invalid_argument("Unsupported broadcast shapes");
+        }
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));

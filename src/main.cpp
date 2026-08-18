@@ -398,7 +398,7 @@ void tinyShake() {
     // }
     GPT<float> model(device::GPU, (4096), context, 384, 2);
     Adam<float> opti(model.parameters(), 0.001);
-    batchSize = 128;
+    batchSize = 160;
     std::vector<std::vector<TokenID>> validationInput;
     std::vector<std::vector<TokenID>> validationTarget;
     // std::cout << "test token size: " << testTokens.size() << '\n';
@@ -441,6 +441,7 @@ void tinyShake() {
                 loss.clearGradientFunction();
                 if (!(valcnt % 500)) loss.print();
 
+                model.save("datasets/tiny shakespeare/model.bin");
 
                 // auto out2 = model.forward(in);
                 // auto predictions = out2.argMax();

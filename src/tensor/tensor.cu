@@ -7,6 +7,57 @@
 template class tensor<float>;
 template class tensor<double>;
 
+//cublas testing:
+#include <cublas_v2.h>
+
+inline cublasHandle_t& getCublasHandle() {
+    static cublasHandle_t handle = [] {
+        cublasHandle_t h;
+        cublasStatus_t stat = cublasCreate(&h);
+        if (stat != CUBLAS_STATUS_SUCCESS) {
+            std::cerr << "cublasCreate failed: " << stat << '\n';
+            std::abort();
+        }
+        cublasSetMathMode(h, CUBLAS_TF32_TENSOR_OP_MATH); // enable tensor cores for fp32
+        return h;
+    }();
+    return handle;
+}
+
+// out[b] (m x n) = A[b] (m x k) * B[b] (k x n), row-major, for each of batchCount batches.
+// strideB = 0 broadcasts a single B across all batches. batchCount = 1 for plain 2D.
+inline void cublasBatchedMatMul(float* out, const float* A, const float* B,
+                                 size_t m, size_t k, size_t n,
+                                 long long strideA, long long strideB, long long strideC,
+                                 size_t batchCount) {
+    const float alpha = 1.0f, beta = 0.0f;
+    cublasStatus_t stat = cublasSgemmStridedBatched(
+        getCublasHandle(), CUBLAS_OP_N, CUBLAS_OP_N,
+        (int)n, (int)m, (int)k,
+        &alpha, B, (int)n, strideB, A, (int)k, strideA,
+        &beta, out, (int)n, strideC, (int)batchCount);
+    if (stat != CUBLAS_STATUS_SUCCESS) {
+        std::cerr << "cublasSgemmStridedBatched failed: " << stat << '\n';
+        std::abort();
+    }
+}
+
+inline void cublasBatchedMatMul(double* out, const double* A, const double* B,
+                                 size_t m, size_t k, size_t n,
+                                 long long strideA, long long strideB, long long strideC,
+                                 size_t batchCount) {
+    const double alpha = 1.0, beta = 0.0;
+    cublasStatus_t stat = cublasDgemmStridedBatched(
+        getCublasHandle(), CUBLAS_OP_N, CUBLAS_OP_N,
+        (int)n, (int)m, (int)k,
+        &alpha, B, (int)n, strideB, A, (int)k, strideA,
+        &beta, out, (int)n, strideC, (int)batchCount);
+    if (stat != CUBLAS_STATUS_SUCCESS) {
+        std::cerr << "cublasDgemmStridedBatched failed: " << stat << '\n';
+        std::abort();
+    }
+}
+
 template <typename t>
 void tensor<t>::constructorAllocate() {
     if (tens) return;
@@ -41,7 +92,7 @@ void tensor<t>::toGPU() const {
     }
     dev = device::GPU;
     tens = tempgpuData;
-    memoryManager::get().registerTensor(&ref);
+    if (ref.On) memoryManager::get().registerTensor(&ref);
 }
 
 template <typename t>
@@ -54,7 +105,7 @@ void tensor<t>::toCPU() const {
     cudaFree(tens);
     tens = tempcpuData;
     dev = device::CPU;
-    memoryManager::get().unregisterTensor(&ref);
+    if (ref.On) memoryManager::get().unregisterTensor(&ref);
 }
 
 template <typename t>
@@ -159,7 +210,7 @@ tensor<t>::tensor(tensor&& other) noexcept : shape(std::move(other.shape)), stor
     tensorsCreated++;
     // std::cout << "Created: " << tensorsCreated
     //           << " Destroyed: " << tensorsDestroyed << '\n';   
-    memoryManager::get().unregisterTensor(&other.ref); 
+    if (other.ref.On) memoryManager::get().unregisterTensor(&other.ref); 
     addDebugId();
     debugLeak();
 }
@@ -196,8 +247,10 @@ tensor<t>& tensor<t>::operator=(const tensor& other) {
             }
             cudaMemcpy(tens, other.tens, storageLength * sizeof(t), cudaMemcpyDeviceToDevice);
         }
-        if (dev == device::GPU) memoryManager::get().registerTensor(&ref); 
-        else memoryManager::get().unregisterTensor(&ref); 
+        if (ref.On) {
+            if (dev == device::GPU) memoryManager::get().registerTensor(&ref); 
+            else memoryManager::get().unregisterTensor(&ref); 
+        }
     }
     return *this;
 }
@@ -227,9 +280,11 @@ tensor<t>& tensor<t>::operator=(tensor&& other) noexcept {
         other.isGradEnabled = false;
         other.grad = nullptr;
         other.gradFunction = nullptr;
-        if (dev == device::GPU) memoryManager::get().registerTensor(&ref); 
-        else memoryManager::get().unregisterTensor(&ref); 
-        memoryManager::get().unregisterTensor(&other.ref); 
+        if (ref.On) {
+            if (dev == device::GPU) memoryManager::get().registerTensor(&ref); 
+            else memoryManager::get().unregisterTensor(&ref); 
+            memoryManager::get().unregisterTensor(&other.ref); 
+        }
     }
     return *this;
 }
@@ -249,7 +304,7 @@ void tensor<t>::fill(t val) {
         toGPU();
     }
     fillKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(val, storageLength, tens);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -274,7 +329,7 @@ template <typename t>
 void tensor<t>::random() {
     toGPU();
     randomKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -386,7 +441,7 @@ tensor<t> tensor<t>::operator+(const tensor& other) const & {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -401,7 +456,7 @@ tensor<t> tensor<t>::operator+(const tensor& other) const & {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastAdd1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -412,7 +467,7 @@ tensor<t> tensor<t>::operator+(const tensor& other) const & {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastAdd2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -428,7 +483,7 @@ tensor<t> tensor<t>::operator+(const tensor& other) const & {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastAdd1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -439,7 +494,7 @@ tensor<t> tensor<t>::operator+(const tensor& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastAdd3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -451,7 +506,7 @@ tensor<t> tensor<t>::operator+(const tensor& other) const & {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastAdd2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -462,7 +517,7 @@ tensor<t> tensor<t>::operator+(const tensor& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastAdd4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -496,7 +551,7 @@ tensor<t> tensor<t>::operator+(const tensor<t>& other) && {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -511,7 +566,7 @@ tensor<t> tensor<t>::operator+(const tensor<t>& other) && {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastAdd1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -522,7 +577,7 @@ tensor<t> tensor<t>::operator+(const tensor<t>& other) && {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastAdd2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -538,7 +593,7 @@ tensor<t> tensor<t>::operator+(const tensor<t>& other) && {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastAdd1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -549,7 +604,7 @@ tensor<t> tensor<t>::operator+(const tensor<t>& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastAdd3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -561,7 +616,7 @@ tensor<t> tensor<t>::operator+(const tensor<t>& other) && {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastAdd2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -572,7 +627,7 @@ tensor<t> tensor<t>::operator+(const tensor<t>& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastAdd4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -606,7 +661,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) const & {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -621,7 +676,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) const & {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastAdd1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -632,7 +687,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) const & {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastAdd2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -648,7 +703,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) const & {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastAdd1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -659,7 +714,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastAdd3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -671,7 +726,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) const & {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastAdd2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -682,7 +737,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastAdd4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -716,7 +771,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) && {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         addKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -731,7 +786,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) && {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastAdd1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -742,7 +797,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) && {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastAdd2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -758,7 +813,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) && {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastAdd1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -769,7 +824,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastAdd3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -781,7 +836,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) && {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastAdd2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -792,7 +847,7 @@ tensor<t> tensor<t>::operator+(tensor<t>&& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastAdd4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -835,7 +890,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) const & {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -850,7 +905,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) const & {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastSubtract1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -861,7 +916,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) const & {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastSubtract2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -877,7 +932,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) const & {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastSubtract1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -888,7 +943,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastSubtract3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -900,7 +955,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) const & {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastSubtract2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -911,7 +966,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastSubtract4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -944,7 +999,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) && {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -959,7 +1014,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) && {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastSubtract1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -970,7 +1025,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) && {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastSubtract2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -986,7 +1041,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) && {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastSubtract1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -997,7 +1052,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastSubtract3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1009,7 +1064,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) && {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastSubtract2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1020,7 +1075,7 @@ tensor<t> tensor<t>::operator-(const tensor& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastSubtract4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1053,7 +1108,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) const & {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -1068,7 +1123,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) const & {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastSubtract1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1079,7 +1134,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) const & {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastSubtract2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1095,7 +1150,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) const & {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastSubtract1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1106,7 +1161,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastSubtract3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1118,7 +1173,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) const & {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastSubtract2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1129,7 +1184,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastSubtract4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1162,7 +1217,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) && {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         subtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -1177,7 +1232,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) && {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastSubtract1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1188,7 +1243,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) && {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastSubtract2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1204,7 +1259,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) && {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastSubtract1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1215,7 +1270,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastSubtract3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1227,7 +1282,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) && {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastSubtract2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1238,7 +1293,7 @@ tensor<t> tensor<t>::operator-(tensor&& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastSubtract4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1324,7 +1379,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) const & {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -1339,7 +1394,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) const & {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastMultiply1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1350,7 +1405,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) const & {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastMultiply2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1366,7 +1421,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) const & {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastMultiply1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1377,7 +1432,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastMultiply3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1389,7 +1444,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) const & {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastMultiply2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1400,7 +1455,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastMultiply4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1432,7 +1487,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) && {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -1447,7 +1502,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) && {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastMultiply1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1458,7 +1513,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) && {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastMultiply2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1474,7 +1529,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) && {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastMultiply1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1485,7 +1540,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastMultiply3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1497,7 +1552,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) && {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastMultiply2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1508,7 +1563,7 @@ tensor<t> tensor<t>::operator*(const tensor& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastMultiply4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1541,7 +1596,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) const & {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -1556,7 +1611,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) const & {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastMultiply1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1567,7 +1622,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) const & {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastMultiply2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1583,7 +1638,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) const & {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastMultiply1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1594,7 +1649,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastMultiply3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1606,7 +1661,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) const & {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastMultiply2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1617,7 +1672,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastMultiply4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1650,7 +1705,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) && {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         multiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -1665,7 +1720,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) && {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastMultiply1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1676,7 +1731,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) && {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastMultiply2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1692,7 +1747,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) && {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastMultiply1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1703,7 +1758,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastMultiply3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1715,7 +1770,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) && {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastMultiply2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1726,7 +1781,7 @@ tensor<t> tensor<t>::operator*(tensor&& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastMultiply4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1812,7 +1867,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) const & {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -1827,7 +1882,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) const & {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastDivide1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1838,7 +1893,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) const & {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastDivide2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1854,7 +1909,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) const & {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastDivide1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1865,7 +1920,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastDivide3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1877,7 +1932,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) const & {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastDivide2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1888,7 +1943,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastDivide4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1920,7 +1975,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) && {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -1935,7 +1990,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) && {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastDivide1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1946,7 +2001,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) && {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastDivide2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1962,7 +2017,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) && {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastDivide1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1973,7 +2028,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastDivide3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1985,7 +2040,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) && {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastDivide2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -1996,7 +2051,7 @@ tensor<t> tensor<t>::operator/(const tensor& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastDivide4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2029,7 +2084,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) const & {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -2044,7 +2099,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) const & {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastDivide1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2055,7 +2110,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) const & {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastDivide2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2071,7 +2126,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) const & {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastDivide1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2082,7 +2137,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastDivide3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2094,7 +2149,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) const & {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastDivide2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2105,7 +2160,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) const & {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastDivide4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2138,7 +2193,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) && {
     temp.setGradient(nullptr);
     if (shape == other.shape) {
         divideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -2153,7 +2208,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) && {
         }
         if (other.shape[1] == 1 && shape[0] == other.shape[0]) {
             broadcastDivide1Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2164,7 +2219,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) && {
         }
         else if (other.shape[0] == 1 && shape[1] == other.shape[1]) {
             broadcastDivide2Kernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2180,7 +2235,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) && {
     else {
         if (other.shape.size() == 2 && other.shape[1] == 1 && shape[1] == other.shape[0]) {
             broadcastDivide1Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2191,7 +2246,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[2] == 1 && shape[1] == other.shape[1]) {
             broadcastDivide3Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[2], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2203,7 +2258,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) && {
         }
         else if (other.shape.size() == 2 && other.shape[0] == 1 && shape[2] == other.shape[1]) {
             broadcastDivide2Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2214,7 +2269,7 @@ tensor<t> tensor<t>::operator/(tensor&& other) && {
         }
         else if (other.shape.size() == 3 && other.shape[1] == 1 && shape[2] == other.shape[2]) {
             broadcastDivide4Kernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(shape[1] * shape[2], temp.data(), other.tens, shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Kernel launch failed: "
@@ -2337,7 +2392,7 @@ tensor<t> tensor<t>::transposed() const & {
     if (shape.size() == 2) {
         temp = tensor<t>(device::GPU, shape[1], shape[0]);
         transposeKernel<<<cuda::ceil_div(storageLength, 256), 256>>> (temp.tens, tens, storageLength, shape[0], shape[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -2349,7 +2404,7 @@ tensor<t> tensor<t>::transposed() const & {
     else if (shape.size() == 3) {
         temp = tensor<t>(device::GPU, shape[0], shape[2], shape[1]);
         transpose3DKernel<<<dim3(cuda::ceil_div(storageLength, 256), shape[0]), 256>>> (temp.tens, tens, shape[1] * shape[2], shape[1], shape[2]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -2377,7 +2432,7 @@ tensor<t> tensor<t>::transposed() && {
     if (shape.size() == 2) {
         temp = tensor<t>(device::GPU, shape[1], shape[0]);
         transposeKernel<<<cuda::ceil_div(storageLength, 256), 256>>> (temp.tens, tens, storageLength, shape[0], shape[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -2389,7 +2444,7 @@ tensor<t> tensor<t>::transposed() && {
     else if (shape.size() == 3) {
         temp = tensor<t>(device::GPU, shape[0], shape[2], shape[1]);
         transpose3DKernel<<<dim3(cuda::ceil_div(storageLength, 256), shape[0]), 256>>> (temp.tens, tens, shape[1] * shape[2], shape[1], shape[2]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -2523,22 +2578,65 @@ tensor<t> tensor<t>::matMul(const tensor<t>& other) const & {
     toGPU();
     other.toGPU();
 
+    // tensor<t> out;
+    // constexpr int tileSize = 16;
+    // dim3 blockSize = dim3(tileSize, tileSize, 1);
+    // if (shape.size() == 2) {
+    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
+    //     dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
+    //     // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //     matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
+    //     // cudaDeviceSynchronize();
+    //     cudaError_t err = cudaGetLastError();
+    //     if (err != cudaSuccess) {
+    //         std::cerr << "Kernel launch failed: "
+    //                 << cudaGetErrorString(err)
+    //                 << '\n';
+    //         std::abort();
+    //     }
+    // }
+    // else if (shape.size() == 3) {
+    //     if (shape.size() == other.shape.size()) {
+    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
+    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
+    //         }
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
+    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //         matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+    //         // cudaDeviceSynchronize();
+    //         cudaError_t err = cudaGetLastError();
+    //         if (err != cudaSuccess) {
+    //             std::cerr << "Kernel launch failed: "
+    //                     << cudaGetErrorString(err)
+    //                     << '\n';
+    //             std::abort();
+    //         }
+    //     }
+    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
+    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //         matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+    //         // cudaDeviceSynchronize();
+    //         cudaError_t err = cudaGetLastError();
+    //         if (err != cudaSuccess) {
+    //             std::cerr << "Kernel launch failed: "
+    //                     << cudaGetErrorString(err)
+    //                     << '\n';
+    //             std::abort();
+    //         }
+    //     }
+    //     else {
+    //         throw std::invalid_argument("Unsupported matmul shapes");
+    //     }    
+    // }
     tensor<t> out;
-    constexpr int tileSize = 16;
-    dim3 blockSize = dim3(tileSize, tileSize, 1);
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-        dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
-        // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-        matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
-        cudaDeviceSynchronize();
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            std::cerr << "Kernel launch failed: "
-                    << cudaGetErrorString(err)
-                    << '\n';
-            std::abort();
-        }
+        cublasBatchedMatMul(out.tens, tens, other.tens,
+                             shape[0], shape[1], other.shape[1],
+                             0, 0, 0, 1);
     }
     else if (shape.size() == 3) {
         if (shape.size() == other.shape.size()) {
@@ -2546,35 +2644,23 @@ tensor<t> tensor<t>::matMul(const tensor<t>& other) const & {
                 throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
             }
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-            matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                std::cerr << "Kernel launch failed: "
-                        << cudaGetErrorString(err)
-                        << '\n';
-                std::abort();
-            }
+            cublasBatchedMatMul(out.tens, tens, other.tens,
+                                 shape[1], shape[2], other.shape[2],
+                                 shape[1] * shape[2],
+                                 other.shape[1] * other.shape[2],
+                                 out.shape[1] * out.shape[2],
+                                 shape[0]);
         }
         else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-            matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                std::cerr << "Kernel launch failed: "
-                        << cudaGetErrorString(err)
-                        << '\n';
-                std::abort();
-            }
+            cublasBatchedMatMul(out.tens, tens, other.tens,
+                                 shape[1], shape[2], other.shape[1],
+                                 shape[1] * shape[2],
+                                 0,   // broadcast: same B for every batch
+                                 out.shape[1] * out.shape[2],
+                                 shape[0]);
         }
-        else {
-            throw std::invalid_argument("Unsupported matmul shapes");
-        }    
+        else { throw std::invalid_argument("Unsupported matmul shapes"); }    
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         out.gradFunction = std::make_shared<matMulNode<t>>(this, &other);
@@ -2595,22 +2681,65 @@ tensor<t> tensor<t>::matMul(const tensor<t>& other) && {
     toGPU();
     other.toGPU();
 
+    // tensor<t> out;
+    // constexpr int tileSize = 16;
+    // dim3 blockSize = dim3(tileSize, tileSize, 1);
+    // if (shape.size() == 2) {
+    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
+    //     dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
+    //     // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //     matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
+    //     // cudaDeviceSynchronize();
+    //     cudaError_t err = cudaGetLastError();
+    //     if (err != cudaSuccess) {
+    //         std::cerr << "Kernel launch failed: "
+    //                 << cudaGetErrorString(err)
+    //                 << '\n';
+    //         std::abort();
+    //     }
+    // }
+    // else if (shape.size() == 3) {
+    //     if (shape.size() == other.shape.size()) {
+    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
+    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
+    //         }
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
+    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //         matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+    //         // cudaDeviceSynchronize();
+    //         cudaError_t err = cudaGetLastError();
+    //         if (err != cudaSuccess) {
+    //             std::cerr << "Kernel launch failed: "
+    //                     << cudaGetErrorString(err)
+    //                     << '\n';
+    //             std::abort();
+    //         }
+    //     }
+    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
+    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //         matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+    //         // cudaDeviceSynchronize();
+    //         cudaError_t err = cudaGetLastError();
+    //         if (err != cudaSuccess) {
+    //             std::cerr << "Kernel launch failed: "
+    //                     << cudaGetErrorString(err)
+    //                     << '\n';
+    //             std::abort();
+    //         }
+    //     }
+    //     else {
+    //         throw std::invalid_argument("Unsupported matmul shapes");
+    //     }    
+    // }
     tensor<t> out;
-    constexpr int tileSize = 16;
-    dim3 blockSize = dim3(tileSize, tileSize, 1);
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-        dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
-        // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-        matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
-        cudaDeviceSynchronize();
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            std::cerr << "Kernel launch failed: "
-                    << cudaGetErrorString(err)
-                    << '\n';
-            std::abort();
-        }
+        cublasBatchedMatMul(out.tens, tens, other.tens,
+                             shape[0], shape[1], other.shape[1],
+                             0, 0, 0, 1);
     }
     else if (shape.size() == 3) {
         if (shape.size() == other.shape.size()) {
@@ -2618,35 +2747,23 @@ tensor<t> tensor<t>::matMul(const tensor<t>& other) && {
                 throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
             }
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-            matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                std::cerr << "Kernel launch failed: "
-                        << cudaGetErrorString(err)
-                        << '\n';
-                std::abort();
-            }
+            cublasBatchedMatMul(out.tens, tens, other.tens,
+                                 shape[1], shape[2], other.shape[2],
+                                 shape[1] * shape[2],
+                                 other.shape[1] * other.shape[2],
+                                 out.shape[1] * out.shape[2],
+                                 shape[0]);
         }
         else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-            matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                std::cerr << "Kernel launch failed: "
-                        << cudaGetErrorString(err)
-                        << '\n';
-                std::abort();
-            }
+            cublasBatchedMatMul(out.tens, tens, other.tens,
+                                 shape[1], shape[2], other.shape[1],
+                                 shape[1] * shape[2],
+                                 0,   // broadcast: same B for every batch
+                                 out.shape[1] * out.shape[2],
+                                 shape[0]);
         }
-        else {
-            throw std::invalid_argument("Unsupported matmul shapes");
-        }    
+        else { throw std::invalid_argument("Unsupported matmul shapes"); }    
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -2668,22 +2785,65 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) const & {
     toGPU();
     other.toGPU();
 
+    // tensor<t> out;
+    // constexpr int tileSize = 16;
+    // dim3 blockSize = dim3(tileSize, tileSize, 1);
+    // if (shape.size() == 2) {
+    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
+    //     dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
+    //     // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //     matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
+    //     // cudaDeviceSynchronize();
+    //     cudaError_t err = cudaGetLastError();
+    //     if (err != cudaSuccess) {
+    //         std::cerr << "Kernel launch failed: "
+    //                 << cudaGetErrorString(err)
+    //                 << '\n';
+    //         std::abort();
+    //     }
+    // }
+    // else if (shape.size() == 3) {
+    //     if (shape.size() == other.shape.size()) {
+    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
+    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
+    //         }
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
+    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //         matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+    //         // cudaDeviceSynchronize();
+    //         cudaError_t err = cudaGetLastError();
+    //         if (err != cudaSuccess) {
+    //             std::cerr << "Kernel launch failed: "
+    //                     << cudaGetErrorString(err)
+    //                     << '\n';
+    //             std::abort();
+    //         }
+    //     }
+    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
+    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //         matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+    //         // cudaDeviceSynchronize();
+    //         cudaError_t err = cudaGetLastError();
+    //         if (err != cudaSuccess) {
+    //             std::cerr << "Kernel launch failed: "
+    //                     << cudaGetErrorString(err)
+    //                     << '\n';
+    //             std::abort();
+    //         }
+    //     }
+    //     else {
+    //         throw std::invalid_argument("Unsupported matmul shapes");
+    //     }    
+    // }
     tensor<t> out;
-    constexpr int tileSize = 16;
-    dim3 blockSize = dim3(tileSize, tileSize, 1);
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-        dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
-        // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-        matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
-        cudaDeviceSynchronize();
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            std::cerr << "Kernel launch failed: "
-                    << cudaGetErrorString(err)
-                    << '\n';
-            std::abort();
-        }
+        cublasBatchedMatMul(out.tens, tens, other.tens,
+                             shape[0], shape[1], other.shape[1],
+                             0, 0, 0, 1);
     }
     else if (shape.size() == 3) {
         if (shape.size() == other.shape.size()) {
@@ -2691,35 +2851,23 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) const & {
                 throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
             }
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-            matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                std::cerr << "Kernel launch failed: "
-                        << cudaGetErrorString(err)
-                        << '\n';
-                std::abort();
-            }
+            cublasBatchedMatMul(out.tens, tens, other.tens,
+                                 shape[1], shape[2], other.shape[2],
+                                 shape[1] * shape[2],
+                                 other.shape[1] * other.shape[2],
+                                 out.shape[1] * out.shape[2],
+                                 shape[0]);
         }
         else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-            matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                std::cerr << "Kernel launch failed: "
-                        << cudaGetErrorString(err)
-                        << '\n';
-                std::abort();
-            }
+            cublasBatchedMatMul(out.tens, tens, other.tens,
+                                 shape[1], shape[2], other.shape[1],
+                                 shape[1] * shape[2],
+                                 0,   // broadcast: same B for every batch
+                                 out.shape[1] * out.shape[2],
+                                 shape[0]);
         }
-        else {
-            throw std::invalid_argument("Unsupported matmul shapes");
-        }    
+        else { throw std::invalid_argument("Unsupported matmul shapes"); }    
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -2741,22 +2889,65 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) && {
     toGPU();
     other.toGPU();
 
+    // tensor<t> out;
+    // constexpr int tileSize = 16;
+    // dim3 blockSize = dim3(tileSize, tileSize, 1);
+    // if (shape.size() == 2) {
+    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
+    //     dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
+    //     // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //     matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
+    //     // cudaDeviceSynchronize();
+    //     cudaError_t err = cudaGetLastError();
+    //     if (err != cudaSuccess) {
+    //         std::cerr << "Kernel launch failed: "
+    //                 << cudaGetErrorString(err)
+    //                 << '\n';
+    //         std::abort();
+    //     }
+    // }
+    // else if (shape.size() == 3) {
+    //     if (shape.size() == other.shape.size()) {
+    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
+    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
+    //         }
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
+    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //         matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+    //         // cudaDeviceSynchronize();
+    //         cudaError_t err = cudaGetLastError();
+    //         if (err != cudaSuccess) {
+    //             std::cerr << "Kernel launch failed: "
+    //                     << cudaGetErrorString(err)
+    //                     << '\n';
+    //             std::abort();
+    //         }
+    //     }
+    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
+    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+    //         matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+    //         // cudaDeviceSynchronize();
+    //         cudaError_t err = cudaGetLastError();
+    //         if (err != cudaSuccess) {
+    //             std::cerr << "Kernel launch failed: "
+    //                     << cudaGetErrorString(err)
+    //                     << '\n';
+    //             std::abort();
+    //         }
+    //     }
+    //     else {
+    //         throw std::invalid_argument("Unsupported matmul shapes");
+    //     }    
+    // }
     tensor<t> out;
-    constexpr int tileSize = 16;
-    dim3 blockSize = dim3(tileSize, tileSize, 1);
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-        dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
-        // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-        matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
-        cudaDeviceSynchronize();
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            std::cerr << "Kernel launch failed: "
-                    << cudaGetErrorString(err)
-                    << '\n';
-            std::abort();
-        }
+        cublasBatchedMatMul(out.tens, tens, other.tens,
+                             shape[0], shape[1], other.shape[1],
+                             0, 0, 0, 1);
     }
     else if (shape.size() == 3) {
         if (shape.size() == other.shape.size()) {
@@ -2764,35 +2955,23 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) && {
                 throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
             }
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-            matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                std::cerr << "Kernel launch failed: "
-                        << cudaGetErrorString(err)
-                        << '\n';
-                std::abort();
-            }
+            cublasBatchedMatMul(out.tens, tens, other.tens,
+                                 shape[1], shape[2], other.shape[2],
+                                 shape[1] * shape[2],
+                                 other.shape[1] * other.shape[2],
+                                 out.shape[1] * out.shape[2],
+                                 shape[0]);
         }
         else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-            matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-            cudaDeviceSynchronize();
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                std::cerr << "Kernel launch failed: "
-                        << cudaGetErrorString(err)
-                        << '\n';
-                std::abort();
-            }
+            cublasBatchedMatMul(out.tens, tens, other.tens,
+                                 shape[1], shape[2], other.shape[1],
+                                 shape[1] * shape[2],
+                                 0,   // broadcast: same B for every batch
+                                 out.shape[1] * out.shape[2],
+                                 shape[0]);
         }
-        else {
-            throw std::invalid_argument("Unsupported matmul shapes");
-        }    
+        else { throw std::invalid_argument("Unsupported matmul shapes"); }    
     }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
@@ -2911,7 +3090,7 @@ void tensor<t>::identity() {
         dim3 blockSize = dim3(16, 16);
         isIdentity = true;
         identityKernel <<<gridSize, blockSize>>> (tens, shape[0], shape[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -2927,7 +3106,7 @@ void tensor<t>::identity() {
         dim3 blockSize = dim3(16, 16, 1);
         isIdentity = true;
         batchedIdentityKernel <<<gridSize, blockSize>>> (tens, shape[1], shape[2]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -2953,7 +3132,7 @@ tensor<t> tensor<t>::operator-() const {
     temp.setGradient(nullptr);
 
     negateKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(temp.tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -2978,7 +3157,7 @@ tensor<t> tensor<t>::exp() const & {
     toGPU();
     tensor<t> out(device::GPU, shape);
     expKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3000,7 +3179,7 @@ tensor<t> tensor<t>::exp() && {
     toGPU();
     tensor<t> out(device::GPU, shape);
     expKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3032,7 +3211,7 @@ tensor<t> tensor<t>::pow(t power) const & {
     toGPU();
     tensor<t> out(device::GPU, shape);
     powKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, power);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3054,7 +3233,7 @@ tensor<t> tensor<t>::pow(t power) && {
     toGPU();
     tensor<t> out(device::GPU, shape);
     powKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, power);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3086,7 +3265,7 @@ tensor<t> tensor<t>::log() const & {
     toGPU();
     tensor<t> out(device::GPU, shape);
     logKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3108,7 +3287,7 @@ tensor<t> tensor<t>::log() && {
     toGPU();
     tensor<t> out(device::GPU, shape);
     logKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3140,7 +3319,7 @@ tensor<t> tensor<t>::operator*(t val) const & {
     toGPU();
     tensor<t> out(device::GPU, shape);
     scalarMultiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3160,7 +3339,7 @@ tensor<t> tensor<t>::operator*(t val) && {
     toGPU();
     tensor<t> out(device::GPU, shape);
     scalarMultiplyKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3190,7 +3369,7 @@ tensor<t> tensor<t>::operator/(t val) const & {
     toGPU();
     tensor<t> out(device::GPU, shape);
     scalarDivideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3210,7 +3389,7 @@ tensor<t> tensor<t>::operator/(t val) && {
     toGPU();
     tensor<t> out(device::GPU, shape);
     scalarDivideKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3241,7 +3420,7 @@ tensor<t> tensor<t>::ReLU() const & {
     tensor<t> out(device::GPU, shape);
 
     ReLUKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3264,7 +3443,7 @@ tensor<t> tensor<t>::ReLU() && {
     tensor<t> out(device::GPU, shape);
 
     ReLUKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3297,7 +3476,7 @@ tensor<t> tensor<t>::sigmoid() const & {
     tensor<t> out(device::GPU, shape);
 
     sigmoidKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3320,7 +3499,7 @@ tensor<t> tensor<t>::sigmoid() && {
     tensor<t> out(device::GPU, shape);
 
     sigmoidKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3353,7 +3532,7 @@ tensor<t> tensor<t>::tanh() const & {
     tensor<t> out(device::GPU, shape);
 
     tanhKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3376,7 +3555,7 @@ tensor<t> tensor<t>::tanh() && {
     tensor<t> out(device::GPU, shape);
 
     tanhKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3412,7 +3591,7 @@ tensor<t> tensor<t>::gelu() const & {
     tensor<t> out(device::GPU, shape);
 
     geluKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3435,7 +3614,7 @@ tensor<t> tensor<t>::gelu() && {
     tensor<t> out(device::GPU, shape);
 
     geluKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(tens, out.tens, storageLength);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -3504,7 +3683,7 @@ tensor<t> tensor<t>::rowSum() const & {
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], 1);
         rowSumKernel<<<shape[0], 256>>>(tens, out.tens, shape[0], shape[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3516,7 +3695,7 @@ tensor<t> tensor<t>::rowSum() const & {
     else if (shape.size() == 3) {
         out = tensor<t>(device::GPU, shape[0], shape[1], 1);
         rowSum3DKernel<<<dim3(shape[1], shape[0]), 256>>>(tens, out.tens, shape[1], shape[2]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3541,7 +3720,7 @@ tensor<t> tensor<t>::rowSum() && {
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], 1);
         rowSumKernel<<<shape[0], 256>>>(tens, out.tens, shape[0], shape[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3553,7 +3732,7 @@ tensor<t> tensor<t>::rowSum() && {
     else if (shape.size() == 3) {
         out = tensor<t>(device::GPU, shape[0], shape[1], 1);
         rowSum3DKernel<<<dim3(shape[1], shape[0]), 256>>>(tens, out.tens, shape[1], shape[2]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3623,7 +3802,7 @@ tensor<t> tensor<t>::colSum() const & {
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, 1, shape[1]);
         colSumKernel<<<shape[1], 256>>>(tens, out.tens, shape[0], shape[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3635,7 +3814,7 @@ tensor<t> tensor<t>::colSum() const & {
     else if (shape.size() == 3) {
         out = tensor<t>(device::GPU, shape[0], 1, shape[2]);
         colSum3DKernel<<<dim3(shape[2], shape[0]), 256>>>(tens, out.tens, shape[1], shape[2]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3661,7 +3840,7 @@ tensor<t> tensor<t>::colSum() && {
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, 1, shape[1]);
         colSumKernel<<<shape[1], 256>>>(tens, out.tens, shape[0], shape[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3673,7 +3852,7 @@ tensor<t> tensor<t>::colSum() && {
     else if (shape.size() == 3) {
         out = tensor<t>(device::GPU, shape[0], 1, shape[2]);
         colSum3DKernel<<<dim3(shape[2], shape[0]), 256>>>(tens, out.tens, shape[1], shape[2]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3744,7 +3923,7 @@ tensor<t> tensor<t>::rowMax() const & {
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], 1);
         rowMaxKernel<<<shape[0], 256>>>(tens, out.tens, shape[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3756,7 +3935,7 @@ tensor<t> tensor<t>::rowMax() const & {
     else if (shape.size() == 3) {
         out = tensor<t>(device::GPU, shape[0], shape[1], 1);
         rowMax3DKernel<<<dim3(shape[1], shape[0]), 256>>>(tens, out.tens, shape[2]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3781,7 +3960,7 @@ tensor<t> tensor<t>::rowMax() && {
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], 1);
         rowMaxKernel<<<shape[0], 256>>>(tens, out.tens, shape[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3793,7 +3972,7 @@ tensor<t> tensor<t>::rowMax() && {
     else if (shape.size() == 3) {
         out = tensor<t>(device::GPU, shape[0], shape[1], 1);
         rowMax3DKernel<<<dim3(shape[1], shape[0]), 256>>>(tens, out.tens, shape[2]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3861,11 +4040,11 @@ tensor<t> tensor<t>::softmax() const & {
             dim3 blocks = dim3(cuda::ceil_div(shape[1], 16), cuda::ceil_div(shape[0], 16));
             dim3 threads = dim3(16, 16);
             broadcastSubtractKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[0], temp.shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             tensor<t> numerator = temp.exp();
             tensor<t> summed = numerator.rowSum();
             softmaxKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(numerator.tens, summed.tens, out.tens, shape[0], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             requiresGrad(true);
         }
         else {
@@ -3873,11 +4052,11 @@ tensor<t> tensor<t>::softmax() const & {
             dim3 blocks = dim3(cuda::ceil_div(shape[1], 16), cuda::ceil_div(shape[0], 16));
             dim3 threads = dim3(16, 16);
             broadcastSubtractKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[0], temp.shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             tensor<t> numerator = temp.exp();
             tensor<t> summed = numerator.rowSum();
             softmaxKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(numerator.tens, summed.tens, out.tens, shape[0], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
         }
     }
     else if (shape.size() == 3) {
@@ -3888,11 +4067,11 @@ tensor<t> tensor<t>::softmax() const & {
             dim3 blocks = dim3(cuda::ceil_div(shape[2], 16), cuda::ceil_div(shape[1], 16), shape[0]);
             dim3 threads = dim3(16, 16, 1);
             broadcastSubtract3DKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[1], temp.shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             tensor<t> numerator = temp.exp();
             tensor<t> summed = numerator.rowSum();
             softmax3DKernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(numerator.tens, summed.tens, out.tens, shape[1], shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             requiresGrad(true);
         }
         else {
@@ -3900,11 +4079,11 @@ tensor<t> tensor<t>::softmax() const & {
             dim3 blocks = dim3(cuda::ceil_div(shape[2], 16), cuda::ceil_div(shape[1], 16), shape[0]);
             dim3 threads = dim3(16, 16, 1);
             broadcastSubtract3DKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[1], temp.shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             tensor<t> numerator = temp.exp();
             tensor<t> summed = numerator.rowSum();
             softmax3DKernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(numerator.tens, summed.tens, out.tens, shape[1], shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
         }
     }
     cudaError_t err = cudaGetLastError();
@@ -3933,11 +4112,11 @@ tensor<t> tensor<t>::softmax() && {
             dim3 blocks = dim3(cuda::ceil_div(shape[1], 16), cuda::ceil_div(shape[0], 16));
             dim3 threads = dim3(16, 16);
             broadcastSubtractKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[0], temp.shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             tensor<t> numerator = temp.exp();
             tensor<t> summed = numerator.rowSum();
             softmaxKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(numerator.tens, summed.tens, out.tens, shape[0], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             requiresGrad(true);
         }
         else {
@@ -3945,11 +4124,11 @@ tensor<t> tensor<t>::softmax() && {
             dim3 blocks = dim3(cuda::ceil_div(shape[1], 16), cuda::ceil_div(shape[0], 16));
             dim3 threads = dim3(16, 16);
             broadcastSubtractKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[0], temp.shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             tensor<t> numerator = temp.exp();
             tensor<t> summed = numerator.rowSum();
             softmaxKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(numerator.tens, summed.tens, out.tens, shape[0], shape[1]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
         }
     }
     else if (shape.size() == 3) {
@@ -3960,11 +4139,11 @@ tensor<t> tensor<t>::softmax() && {
             dim3 blocks = dim3(cuda::ceil_div(shape[2], 16), cuda::ceil_div(shape[1], 16), shape[0]);
             dim3 threads = dim3(16, 16, 1);
             broadcastSubtract3DKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[1], temp.shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             tensor<t> numerator = temp.exp();
             tensor<t> summed = numerator.rowSum();
             softmax3DKernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(numerator.tens, summed.tens, out.tens, shape[1], shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             requiresGrad(true);
         }
         else {
@@ -3972,11 +4151,11 @@ tensor<t> tensor<t>::softmax() && {
             dim3 blocks = dim3(cuda::ceil_div(shape[2], 16), cuda::ceil_div(shape[1], 16), shape[0]);
             dim3 threads = dim3(16, 16, 1);
             broadcastSubtract3DKernel<<<blocks, threads>>>(tens, rowMax().tens, temp.tens, temp.shape[1], temp.shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
             tensor<t> numerator = temp.exp();
             tensor<t> summed = numerator.rowSum();
             softmax3DKernel<<<dim3(cuda::ceil_div(shape[1] * shape[2], 256), shape[0]), dim3(256, 1)>>>(numerator.tens, summed.tens, out.tens, shape[1], shape[2]);
-            cudaDeviceSynchronize();
+            // cudaDeviceSynchronize();
         }
     }
     cudaError_t err = cudaGetLastError();
@@ -4064,7 +4243,7 @@ tensor<t> tensor<t>::batch(size_t batchSize, int axis) const & {
             batch3Kernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, storageLength);
         }
     }
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -4115,7 +4294,7 @@ tensor<t> tensor<t>::batch(size_t batchSize, int axis) && {
             batch3Kernel<<<cuda::ceil_div(out.storageLength, 256), 256>>>(tens, out.tens, out.storageLength, storageLength);
         }
     }
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -4183,7 +4362,8 @@ std::vector<std::vector<TokenID>> tensor<t>::argMax() const {
         TokenID* GPUOut;
         cudaMalloc(&GPUOut, shape[0] * sizeof(TokenID));
         argMaxKernel<<<shape[0], 256>>>(tens, GPUOut, shape[1]);
-        cudaError_t err = cudaDeviceSynchronize();
+        //cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
                     << cudaGetErrorString(err)
@@ -4213,7 +4393,7 @@ std::vector<std::vector<TokenID>> tensor<t>::argMax() const {
             std::abort();
         }
         argMax3DKernel<<<shape[1], 256>>>(tens, GPUOut, shape[2], i);
-        err = cudaDeviceSynchronize();
+        // err = cudaDeviceSynchronize();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
                     << cudaGetErrorString(err)
@@ -4247,7 +4427,7 @@ tensor<t> tensor<t>::operator+(t val) const & {
     toGPU();
     tensor<t> out(device::GPU, shape);
     digitAddKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -4267,7 +4447,7 @@ tensor<t> tensor<t>::operator+(t val) && {
     toGPU();
     tensor<t> out(device::GPU, shape);
     digitAddKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -4297,7 +4477,7 @@ tensor<t> tensor<t>::operator-(t val) const & {
     toGPU();
     tensor<t> out(device::GPU, shape);
     digitSubtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -4317,7 +4497,7 @@ tensor<t> tensor<t>::operator-(t val) && {
     toGPU();
     tensor<t> out(device::GPU, shape);
     digitSubtractKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(out.tens, tens, storageLength, val);   
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -4358,7 +4538,7 @@ tensor<t> tensor<t>::batchSum() const {
     toGPU();
     tensor<t> out = tensor<t>(device::GPU, shape[1], shape[2]);
     batchSumKernel<<<dim3(shape[1] * shape[2]), dim3(256)>>>(tens, out.tens, shape[0]);
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "

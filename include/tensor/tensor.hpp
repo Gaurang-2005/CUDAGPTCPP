@@ -19,10 +19,10 @@ inline bool DebugLeak = false;
 inline std::atomic<size_t> id = 0;
 
 class tensorMem {
-    const bool On = false;
     const tensor<float>* refF = nullptr;
     const tensor<double>* refD = nullptr;
 public:
+    const bool On = false;
     tensorMem(tensor<float>* ptr);  
     tensorMem(tensor<double>* ptr);
     void toCPU();

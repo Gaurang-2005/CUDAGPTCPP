@@ -524,7 +524,7 @@ void reluNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
     tensor<t> temp(device::GPU, A->getShape());
     reluGradKernel<<<cuda::ceil_div(temp.numElements(), 256), 256>>>(A->data(),temp.data(), temp.numElements());
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -606,7 +606,7 @@ void geluNode<t>::backward(const tensor<t>& owner) {
     tensor<t> temp(device::GPU, A->getShape());
     A -> toGPU();
     geluGradKernel<<<cuda::ceil_div(temp.numElements(), 256), 256>>>(A->data(),temp.data(), temp.numElements());
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -656,7 +656,7 @@ void softmaxNode<t>::backward(const tensor<t>& owner) {
         threads = dim3(16, 16, 1);
         broadcastSubtractKernel<<<blocks, threads>>>(owner.gradient()->data(), dotProd.data(), temp.data(), A->getShape()[1], A->getShape()[2]);
     }    
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -691,7 +691,7 @@ void crossEntropyLossNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
     tensor<t> temp(device::GPU, A->getShape());
     crossEntropyGradKernel<<<cuda::ceil_div(temp.numElements(), 256), 256>>>(A->data(), B->data(), temp.data(), temp.numElements(), ((temp.getShape().size() == 2) ? temp.getShape()[0] : temp.getShape()[0] * temp.getShape()[1]));
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -773,7 +773,7 @@ void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
             std::abort();
         } 
         tokenEmbeddingNodeKernel<<<dim3(cuda::ceil_div(len, 16),cuda::ceil_div(weight->getShape()[1], 16)), dim3(16, 16)>>>(weight->gradient()->data(), owner.gradient()->data(), temp, len, weight->getShape()[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -815,7 +815,7 @@ void tokenEmbeddingNode<t>::backward(const tensor<t>& owner) {
             std::abort();
         } 
         tokenEmbeddingNodeKernel<<<dim3(cuda::ceil_div(len, 16),cuda::ceil_div(weight->getShape()[1], 16), batchSize), dim3(16, 16, 1)>>>(weight->gradient()->data(), owner.gradient()->data(), temp, len, weight->getShape()[1]);
-        cudaDeviceSynchronize();
+        // cudaDeviceSynchronize();
         err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -852,7 +852,8 @@ void positionEmbeddingNode<t>::backward(const tensor<t>& owner) {
         weight->gradient()->zeros();
     }
     positionEmbeddingNodeKernel<<<dim3(cuda::ceil_div(owner.gradient()->numElements(), 256)), dim3(256)>>>(weight->gradient()->data(), owner.gradient()->data(), owner.gradient()->numElements());
-    cudaError_t err = cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
@@ -908,8 +909,8 @@ void singleHeadAttentionNode<t>::backward(const tensor<t>& owner) {
         else wKey-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dK).batchSum()));
         if (wQuery-> gradient()) *wQuery-> gradient() += input->transposed().matMul(dQ).batchSum();
         else wQuery-> setGradient(std::make_shared<tensor<t>>(input->transposed().matMul(dQ).batchSum()));
-        if (input-> gradient()) *input-> gradient() += dV.matMul(wVal->transposed().batch(dV.getShape()[0], 2)) + dK.matMul(wKey->transposed().batch(dK.getShape()[0], 2)) + dQ.matMul(wQuery->transposed().batch(dQ.getShape()[0], 2));
-        else input-> setGradient(std::make_shared<tensor<t>>(dV.matMul(wVal->transposed().batch(dV.getShape()[0], 2)) + dK.matMul(wKey->transposed().batch(dK.getShape()[0], 2)) + dQ.matMul(wQuery->transposed().batch(dQ.getShape()[0], 2))));
+        if (input-> gradient()) *input-> gradient() += dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed());
+        else input-> setGradient(std::make_shared<tensor<t>>(dV.matMul(wVal->transposed()) + dK.matMul(wKey->transposed()) + dQ.matMul(wQuery->transposed())));
     }
     wQuery->requiresGrad(true);
     wKey->requiresGrad(true);
@@ -980,7 +981,8 @@ void gatherNode<t>::backward(const tensor<t>& owner) {
         owner.gradient()->toGPU();
         scatterKernel<<<dim3(cuda::ceil_div((*batchedB)[0].size(), 256), batchedB->size()), dim3(256, 1)>>>(grad.data(), owner.gradient()->data(), temp, (*batchedB)[0].size(), grad.getShape()[2]);
     }
-    cudaError_t err = cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
@@ -1078,7 +1080,7 @@ void rowMaxNode<t>::backward(const tensor<t>& owner) {
             std::abort();
         }
         rowMaxNodeKernel<<<cuda::ceil_div(temp.getShape()[0], 256), 256>>>(temp.data(), owner.gradient()->data(), argVecG, temp.getShape()[0], temp.getShape()[1]);
-        err = cudaDeviceSynchronize();
+        // err = cudaDeviceSynchronize();
     }
     else if(temp.getShape().size() == 3) {
         TokenID* argVecG;
@@ -1103,7 +1105,7 @@ void rowMaxNode<t>::backward(const tensor<t>& owner) {
             std::abort();
         }
         rowMaxNodeKernel<<<dim3(cuda::ceil_div(temp.getShape()[1], 256), temp.getShape()[0]), dim3(256, 1)>>>(temp.data(), owner.gradient()->data(), argVecG, temp.getShape()[1], A->getShape()[2]);
-        err = cudaDeviceSynchronize();
+        // err = cudaDeviceSynchronize();
     }
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "

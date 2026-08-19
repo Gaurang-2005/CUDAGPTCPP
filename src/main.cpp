@@ -416,6 +416,7 @@ void tinyShake() {
     bool achieved = false;
     validationInput = readBatchedInput("datasets/tiny shakespeare/validationInput.bin");
     validationTarget = readBatchedInput("datasets/tiny shakespeare/validationTarget.bin");
+    model.load("datasets/tiny shakespeare/model.bin");
     for (int i = 0; i < 100; i++) {
         std::cout << "epoch: " << i <<'\n';
         int temp = 0;

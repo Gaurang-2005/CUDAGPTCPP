@@ -46,7 +46,7 @@ tensor<t> tokenEmbedding<t>::forward(const std::vector<TokenID>& input) {
     }
     delete[] inputCpy;
     tokenEmbeddingKernel<<<cuda::ceil_div(out.numElements(), 256), 256>>>(out.data(), temp, weight.data(), weight.getShape()[1], out.numElements());
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -85,7 +85,7 @@ tensor<t> tokenEmbedding<t>::forward(const std::vector<std::vector<TokenID>>& in
         }
     }
     tokenEmbeddingKernel<<<cuda::ceil_div(out.numElements(), 256), 256>>>(out.data(), temp, weight.data(), weight.getShape()[1], out.numElements());
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
@@ -113,7 +113,8 @@ tensor<t> positionEmbedding<t>::forward(size_t len, size_t batchSize) {
     if (len > weight.getShape()[0]) throw std::invalid_argument("Input sequence is longer than the maximum supported sequence length.");
     tensor<t> out(device::GPU, len, weight.getShape()[1]);
     positionEmbeddingKernel<<<cuda::ceil_div(out.numElements(), 256), 256>>>(out.data(), weight.data(), out.numElements());
-    cudaError_t err = cudaDeviceSynchronize();
+    // cudaError_t err = cudaDeviceSynchronize();
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Kernel launch failed: "
                 << cudaGetErrorString(err)
@@ -142,7 +143,8 @@ tensor<t> singleHeadAttention<t>::scaledDotProductAttention(const tensor<t>& Q, 
     if (Q.getShape().size() == 2) {
         scores = scores / std::sqrt(Q.getShape()[1]);
         softmaxMaskKernel<<<dim3(cuda::ceil_div(scores.getShape()[0], 16), cuda::ceil_div(scores.getShape()[1], 16)), dim3(16, 16)>>>(scores.data(), scores.getShape()[0], scores.getShape()[1]);
-        cudaError_t err = cudaDeviceSynchronize();
+        // cudaError_t err = cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
                     << cudaGetErrorString(err)
@@ -154,7 +156,8 @@ tensor<t> singleHeadAttention<t>::scaledDotProductAttention(const tensor<t>& Q, 
     if (Q.getShape().size() == 3) {
         scores = scores / std::sqrt(Q.getShape()[2]);
         softmaxMaskKernel<<<dim3(cuda::ceil_div(scores.getShape()[1], 16), cuda::ceil_div(scores.getShape()[2], 16), scores.getShape()[0]), dim3(16, 16, 1)>>>(scores.data(), scores.getShape()[1], scores.getShape()[2]);
-        cudaError_t err = cudaDeviceSynchronize();
+        // cudaError_t err = cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
                     << cudaGetErrorString(err)

@@ -4,12 +4,15 @@
 
 template class tokenEmbedding<float>;
 template class tokenEmbedding<double>;
+template class tokenEmbedding<__half>;
 
 template class positionEmbedding<float>;
 template class positionEmbedding<double>;
+template class positionEmbedding<__half>;
 
 template class singleHeadAttention<float>;
 template class singleHeadAttention<double>;
+template class singleHeadAttention<__half>;
 
 template <typename t>
 __global__ void tokenEmbeddingKernel(t* output, const TokenID* input, const t* weight, const size_t dim, const size_t storageLength) {

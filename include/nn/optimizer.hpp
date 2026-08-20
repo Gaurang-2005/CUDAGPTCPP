@@ -75,8 +75,15 @@ public:
     }
     void step() override {
         st++;
-        t bias1 = 1 - std::pow(beta1, st);
-        t bias2 = 1 - std::pow(beta2, st);
+        t bias1, bias2;
+        if constexpr (std::is_same_v<t, __half>) {
+            bias1 = 1 - std::pow(__half2float(beta1), st);
+            bias2 = 1 - std::pow(__half2float(beta2), st);
+        }
+        else {
+            bias1 = 1 - std::pow(beta1, st);
+            bias2 = 1 - std::pow(beta2, st);
+        }
         for (size_t i = 0; i < this -> parameters.size(); i++) {   
             if (!this->parameters[i]->gradient()) {
                 std::cout << "WARNING: param " << i << " has no gradient this step\n";
@@ -85,8 +92,14 @@ public:
             m[i].toGPU();
             v[i].toGPU();
             this -> parameters[i] -> requiresGrad(false);
-            m[i] = m[i] * beta1 + *(this -> parameters[i] -> gradient()) * (1 - beta1);
-            v[i] = v[i] * beta2 + *(this -> parameters[i] -> gradient()) * *(this -> parameters[i] -> gradient()) * (1 - beta2);
+            if constexpr (std::is_same_v<t, __half>) {
+                m[i] = m[i] * beta1 + *(this -> parameters[i] -> gradient()) * (__float2half(1) - beta1);
+                v[i] = v[i] * beta2 + *(this -> parameters[i] -> gradient()) * *(this -> parameters[i] -> gradient()) * (__float2half(1) - beta2);
+            }
+            else {
+                m[i] = m[i] * beta1 + *(this -> parameters[i] -> gradient()) * (1 - beta1);
+                v[i] = v[i] * beta2 + *(this -> parameters[i] -> gradient()) * *(this -> parameters[i] -> gradient()) * (1 - beta2);
+            }
             *(this -> parameters[i]) = *(this -> parameters[i]) - ((m[i] / bias1) / ((v[i] / bias2).pow(0.5) + epsilon)) * learningRate;
             this -> parameters[i] -> requiresGrad(true);
         }

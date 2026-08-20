@@ -20,7 +20,6 @@ struct MergeInfo {
     size_t rank;
 };
 
-template <typename t>
 class BPE {
     size_t vocabSize;
     std::unordered_map<TokenID, TokenPair> mergeRules;
@@ -151,10 +150,6 @@ public:
         }
 
         return out;
-    }
-
-    std::string decode(const tensor<t>& input) const {
-        return decode(input.argMax());
     }
     
     void save(const std::string& filename) const {

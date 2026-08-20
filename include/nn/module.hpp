@@ -131,9 +131,18 @@ public:
     tensor<t> forward(const tensor<t>& input) override {
         tensor<t> out;
         if (input.getShape().size() == 2) {
-            auto centered = input - (input.rowSum() / input.getShape()[1]);
-            auto centcpy = centered;
-            auto var = std::move(centcpy).pow(2).rowSum() / input.getShape()[1];
+            tensor<t> centered;
+            tensor<t> var;
+            if constexpr (std::is_same_v<t, __half>) {
+                centered = input - (input.rowSum() / __double2half(input.getShape()[1]));
+                auto centcpy = centered;
+                var = std::move(centcpy).pow(2).rowSum() / __double2half(input.getShape()[1]);
+            }            
+            else {
+                centered = input - (input.rowSum() / input.getShape()[1]);
+                auto centcpy = centered;
+                var = std::move(centcpy).pow(2).rowSum() / input.getShape()[1];
+            }    
             auto varShape = var.getShape();
             auto std = (std::move(var) + epsilon).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
@@ -141,9 +150,18 @@ public:
             out = std::move(norm) * gamma + beta;
         }
         else if (input.getShape().size() == 3) {
-            auto centered = input - (input.rowSum() / input.getShape()[2]);
-            auto centcpy = centered;
-            auto var = std::move(centcpy).pow(2).rowSum() / input.getShape()[2];
+            tensor<t> centered;
+            tensor<t> var;
+            if constexpr (std::is_same_v<t, __half>) {
+                centered = input - (input.rowSum() / __double2half(input.getShape()[2]));
+                auto centcpy = centered;
+                var = std::move(centcpy).pow(2).rowSum() / __double2half(input.getShape()[2]);
+            }            
+            else {
+                centered = input - (input.rowSum() / input.getShape()[2]);
+                auto centcpy = centered;
+                var = std::move(centcpy).pow(2).rowSum() / input.getShape()[2];
+            }    
             auto varShape = var.getShape();
             auto std = (std::move(var) + epsilon).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
@@ -160,9 +178,18 @@ public:
         if (input.getShape().size() == 2) {
             auto inShape = input.getShape();
             auto input1 = input;
-            auto centered = std::move(input1) - (std::move(input).rowSum() / inShape[1]);
-            auto cent2 = centered;
-            auto var = std::move(cent2).pow(2).rowSum() / inShape[1];
+            tensor<t> centered;
+            tensor<t> var;
+            if constexpr (std::is_same_v<t, __half>) {
+                centered = std::move(input1) - (std::move(input).rowSum() / __double2half(inShape[1]));
+                auto cent2 = centered;
+                var = std::move(cent2).pow(2).rowSum() / __double2half(inShape[1]);
+            }            
+            else {
+                centered = std::move(input1) - (std::move(input).rowSum() / inShape[1]);
+                auto cent2 = centered;
+                var = std::move(cent2).pow(2).rowSum() / inShape[1];
+            }    
             auto varShape = var.getShape();
             auto std = (std::move(var) + epsilon).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
@@ -172,9 +199,18 @@ public:
         else if (input.getShape().size() == 3) {
             auto inShape = input.getShape();
             auto input1 = input;
-            auto centered = std::move(input1) - (std::move(input).rowSum() / inShape[2]);
-            auto cent2 = centered;
-            auto var = std::move(cent2).pow(2).rowSum() / inShape[2];
+            tensor<t> centered;
+            tensor<t> var;
+            if constexpr (std::is_same_v<t, __half>) {
+                centered = std::move(input1) - (std::move(input).rowSum() / __double2half(inShape[2]));
+                auto cent2 = centered;
+                var = std::move(cent2).pow(2).rowSum() / __double2half(inShape[2]);
+            }            
+            else {
+                centered = std::move(input1) - (std::move(input).rowSum() / inShape[2]);
+                auto cent2 = centered;
+                var = std::move(cent2).pow(2).rowSum() / inShape[2];
+            } 
             auto varShape = var.getShape();
             auto std = (std::move(var) + epsilon).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);

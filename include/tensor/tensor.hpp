@@ -5,6 +5,7 @@
 #include <cassert>
 #include "autograd/node.hpp"
 #include <iostream>
+#include <cuda_fp16.h>
 
 enum class device {
     CPU,
@@ -21,10 +22,12 @@ inline std::atomic<size_t> id = 0;
 class tensorMem {
     const tensor<float>* refF = nullptr;
     const tensor<double>* refD = nullptr;
+    const tensor<__half>* reffp16 = nullptr;
 public:
     const bool On = false;
     tensorMem(tensor<float>* ptr);  
     tensorMem(tensor<double>* ptr);
+    tensorMem(tensor<__half>* ptr);
     void toCPU();
     void toGPU();
     ~tensorMem();
@@ -330,15 +333,25 @@ public:
         tensor<t> out;
         if (isGradEnabled) {
             isGradEnabled = false;
-            out = sum();
-            out.toCPU();
-            out.tens[0] /= storageLength;
+            if constexpr (std::is_same_v<t, __half>) {
+                out = *this / __double2half(storageLength);
+                out = out.sum();
+            }
+            else {
+                out = *this / storageLength;
+                out = out.sum();
+            }
             isGradEnabled = true;
         }
         else {
-            out = sum();
-            out.toCPU();
-            out.tens[0] /= storageLength;
+            if constexpr (std::is_same_v<t, __half>) {
+                out = *this / __double2half(storageLength);
+                out = out.sum();
+            }
+            else {
+                out = *this / storageLength;
+                out = out.sum();
+            }
         }
         if (isGradEnabled) {
             out.isGradEnabled = true;
@@ -350,15 +363,25 @@ public:
         tensor<t> out;
         if (isGradEnabled) {
             isGradEnabled = false;
-            out = sum();
-            out.toCPU();
-            out.tens[0] /= storageLength;
+            if constexpr (std::is_same_v<t, __half>) {
+                out = *this / __double2half(storageLength);
+                out = out.sum();
+            }
+            else {
+                out = *this / storageLength;
+                out = out.sum();
+            }
             isGradEnabled = true;
         }
         else {
-            out = sum();
-            out.toCPU();
-            out.tens[0] /= storageLength;
+            if constexpr (std::is_same_v<t, __half>) {
+                out = *this / __double2half(storageLength);
+                out = out.sum();
+            }
+            else {
+                out = *this / storageLength;
+                out = out.sum();
+            }
         }
         if (isGradEnabled) {
             std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));

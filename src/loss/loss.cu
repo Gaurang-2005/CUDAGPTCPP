@@ -20,6 +20,16 @@ template tensor<double> crossEntropyLoss(
     const std::vector<std::vector<TokenID>>&
 );
 
+template tensor<__half> crossEntropyLoss(
+    const tensor<__half>&,
+    const std::vector<TokenID>&
+);
+
+template tensor<__half> crossEntropyLoss(
+    const tensor<__half>&,
+    const std::vector<std::vector<TokenID>>&
+);
+
 template <typename t>
 __global__ void crossEntropyLossLLMKernel(t* out, const t* logits, const TokenID* targ, const size_t targLength, const size_t vocabLen) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;

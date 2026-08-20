@@ -8,93 +8,123 @@ inline bool debugGraph = false;
 
 template class addNode<float>;
 template class addNode<double>;
+template class addNode<__half>;
 
 template class subtractNode<float>;
 template class subtractNode<double>;
+template class subtractNode<__half>;
 
 template class multiplyNode<float>;
 template class multiplyNode<double>;
+template class multiplyNode<__half>;
 
 template class divideNode<float>;
 template class divideNode<double>;
+template class divideNode<__half>;
 
 template class matMulNode<float>;
 template class matMulNode<double>;
+template class matMulNode<__half>;
 
 template class transposeNode<float>;
 template class transposeNode<double>;
+template class transposeNode<__half>;
 
 template class sumNode<float>;
 template class sumNode<double>;
+template class sumNode<__half>;
 
 template class meanNode<float>;
 template class meanNode<double>;
+template class meanNode<__half>;
 
 template class reshapeNode<float>;
 template class reshapeNode<double>;
+template class reshapeNode<__half>;
 
 template class expNode<float>;
 template class expNode<double>;
+template class expNode<__half>;
 
 template class logNode<float>;
 template class logNode<double>;
+template class logNode<__half>;
 
 template class powNode<float>;
 template class powNode<double>;
+template class powNode<__half>;
 
 template class reluNode<float>;
 template class reluNode<double>;
+template class reluNode<__half>;
 
 template class sigmoidNode<float>;
 template class sigmoidNode<double>;
+template class sigmoidNode<__half>;
 
 template class tanhNode<float>;
 template class tanhNode<double>;
+template class tanhNode<__half>;
 
 template class geluNode<float>;
 template class geluNode<double>;
+template class geluNode<__half>;
 
 template class softmaxNode<float>;
 template class softmaxNode<double>;
+template class softmaxNode<__half>;
 
 template class crossEntropyLossNode<float>;
 template class crossEntropyLossNode<double>;
+template class crossEntropyLossNode<__half>;
 
 template class batchNode<float>;
 template class batchNode<double>;
+template class batchNode<__half>;
 
 template class tokenEmbeddingNode<float>;
 template class tokenEmbeddingNode<double>;
+template class tokenEmbeddingNode<__half>;
 
 template class positionEmbeddingNode<float>;
 template class positionEmbeddingNode<double>;
+template class positionEmbeddingNode<__half>;
 
 template class singleHeadAttentionNode<float>;
 template class singleHeadAttentionNode<double>;
+template class singleHeadAttentionNode<__half>;
 
 template class gatherNode<float>;
 template class gatherNode<double>;
+template class gatherNode<__half>;
 
 template class rowSumNode<float>;
 template class rowSumNode<double>;
+template class rowSumNode<__half>;
 
 template class colSumNode<float>;
 template class colSumNode<double>;
+template class colSumNode<__half>;
 
 template class rowMaxNode<float>;
 template class rowMaxNode<double>;
+template class rowMaxNode<__half>;
 
 template class scalarDivideNode<float>;
 template class scalarDivideNode<double>;
+template class scalarDivideNode<__half>;
 
 template class scalarMultiplyNode<float>;
 template class scalarMultiplyNode<double>;
+template class scalarMultiplyNode<__half>;
 
 template class scalarAddNode<float>;
 template class scalarAddNode<double>;
+template class scalarAddNode<__half>;
 
 template class scalarSubtractNode<float>;
 template class scalarSubtractNode<double>;
+template class scalarSubtractNode<__half>;
 
 template <typename t>
 void addNode<t>::backward(const tensor<t>& owner) {
@@ -434,7 +464,10 @@ void meanNode<t>::backward(const tensor<t>& owner) {
     A->requiresGrad(false);
     tensor<t> temp(device::GPU, A->getShape());
     owner.gradient()->toCPU();
-    temp.fill(owner.gradient()->data()[0] / temp.numElements());
+    if constexpr (std::is_same_v<t, __half>) {
+        temp.fill(owner.gradient()->data()[0] / __double2half(temp.numElements()));
+    }
+    else temp.fill(owner.gradient()->data()[0] / temp.numElements());
     if (A -> gradient()) *A -> gradient() += temp;
     else A -> setGradient(std::make_shared<tensor<t>>(temp));
     A->requiresGrad(true);
@@ -497,8 +530,14 @@ void powNode<t>::backward(const tensor<t>& owner) {
     if (debugGraph) std::cout << "powNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * A -> pow(power - 1) * power;
-    else A -> setGradient(std::make_shared<tensor<t>>(*(owner.gradient()) * A -> pow(power - 1) * power));
+    if constexpr (std::is_same_v<t, __half>) {
+        if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * A -> pow(power - __float2half(1)) * power;
+        else A -> setGradient(std::make_shared<tensor<t>>(*(owner.gradient()) * A -> pow(power - __float2half(1)) * power));
+    }
+    else {
+        if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * A -> pow(power - 1) * power;
+        else A -> setGradient(std::make_shared<tensor<t>>(*(owner.gradient()) * A -> pow(power - 1) * power));
+    }
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
@@ -511,8 +550,14 @@ __global__ void reluGradKernel(const t* tens, t* out, size_t storageLength) {
 
     if (idx >= storageLength) return;
 
-    if (tens[idx] > 0) out[idx] = t(1);
-    else out[idx] = t(0);
+    if constexpr (std::is_same_v<t, __half>) {
+        if (tens[idx] > __float2half(0.0f)) out[idx] = __float2half(1.0f);
+        else out[idx] = __float2half(0.0f);
+    }
+    else {
+        if (tens[idx] > 0) out[idx] = t(1);
+        else out[idx] = t(0);
+    }
 }
 
 template <typename t>
@@ -586,14 +631,29 @@ __global__ void geluGradKernel(const t* tens, t* out, size_t storageLength) {
 
     if (idx >= storageLength) return;
 
-    constexpr t root2OnRootPi = t(0.79788456080286535587989211986876L);
-    constexpr t geluConst = t(0.044715);
-    constexpr t geluGradConst = t(0.134145);
+    if constexpr (std::is_same_v<t, __half>) {
+        float x = __half2float(tens[idx]);
 
-    t u = root2OnRootPi * (tens[idx] + tens[idx] * tens[idx] * tens[idx] * geluConst);
-    u = tanh(u);
-    out[idx] = 0.5 * ((1 + u) + tens[idx] * (1 - u * u) * root2OnRootPi * (1 + geluGradConst * tens[idx] * tens[idx])); 
+        constexpr float root2OnRootPi = 0.7978845608028654f;
+        constexpr float geluConst = 0.044715f;
+        constexpr float geluGradConst = 0.134145f;
 
+        float u = root2OnRootPi * (x + x * x * x * geluConst);
+        u = tanhf(u);
+
+        float result = 0.5f * ((1.0f + u) + x * (1.0f - u * u) * root2OnRootPi * (1.0f + geluGradConst * x * x));
+
+        out[idx] = __float2half(result);
+    }
+    else {
+        constexpr t root2OnRootPi = t(0.79788456080286535587989211986876L);
+        constexpr t geluConst = t(0.044715);
+        constexpr t geluGradConst = t(0.134145);
+
+        t u = root2OnRootPi * (tens[idx] + tens[idx] * tens[idx] * tens[idx] * geluConst);
+        u = tanh(u);
+        out[idx] = t(0.5) * ((t(1) + u) + tens[idx] * (t(1) - u * u) * root2OnRootPi * (t(1) + geluGradConst * tens[idx] * tens[idx]));
+    }
 }
 
 template <typename t>
@@ -678,8 +738,12 @@ __global__ void crossEntropyGradKernel(const t* pred, const t* targ, t* out, siz
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (idx >= storageLength) return;
-
-    out[idx] = - (targ[idx] / (rows * pred[idx]));
+    if constexpr (std::is_same_v<t, __half>) {
+        out[idx] = - (targ[idx] / (__double2half(rows) * pred[idx]));
+    }
+    else {
+        out[idx] = - (targ[idx] / (rows * pred[idx]));
+    }
 }
 
 template <typename t>

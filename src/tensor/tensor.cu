@@ -6,57 +6,58 @@
 
 template class tensor<float>;
 template class tensor<double>;
+template class tensor<__half>;
 
 //cublas testing:
-#include <cublas_v2.h>
+// #include <cublas_v2.h>
 
-inline cublasHandle_t& getCublasHandle() {
-    static cublasHandle_t handle = [] {
-        cublasHandle_t h;
-        cublasStatus_t stat = cublasCreate(&h);
-        if (stat != CUBLAS_STATUS_SUCCESS) {
-            std::cerr << "cublasCreate failed: " << stat << '\n';
-            std::abort();
-        }
-        cublasSetMathMode(h, CUBLAS_TF32_TENSOR_OP_MATH); // enable tensor cores for fp32
-        return h;
-    }();
-    return handle;
-}
+// inline cublasHandle_t& getCublasHandle() {
+//     static cublasHandle_t handle = [] {
+//         cublasHandle_t h;
+//         cublasStatus_t stat = cublasCreate(&h);
+//         if (stat != CUBLAS_STATUS_SUCCESS) {
+//             std::cerr << "cublasCreate failed: " << stat << '\n';
+//             std::abort();
+//         }
+//         cublasSetMathMode(h, CUBLAS_TF32_TENSOR_OP_MATH); // enable tensor cores for fp32
+//         return h;
+//     }();
+//     return handle;
+// }
 
-// out[b] (m x n) = A[b] (m x k) * B[b] (k x n), row-major, for each of batchCount batches.
-// strideB = 0 broadcasts a single B across all batches. batchCount = 1 for plain 2D.
-inline void cublasBatchedMatMul(float* out, const float* A, const float* B,
-                                 size_t m, size_t k, size_t n,
-                                 long long strideA, long long strideB, long long strideC,
-                                 size_t batchCount) {
-    const float alpha = 1.0f, beta = 0.0f;
-    cublasStatus_t stat = cublasSgemmStridedBatched(
-        getCublasHandle(), CUBLAS_OP_N, CUBLAS_OP_N,
-        (int)n, (int)m, (int)k,
-        &alpha, B, (int)n, strideB, A, (int)k, strideA,
-        &beta, out, (int)n, strideC, (int)batchCount);
-    if (stat != CUBLAS_STATUS_SUCCESS) {
-        std::cerr << "cublasSgemmStridedBatched failed: " << stat << '\n';
-        std::abort();
-    }
-}
+// // out[b] (m x n) = A[b] (m x k) * B[b] (k x n), row-major, for each of batchCount batches.
+// // strideB = 0 broadcasts a single B across all batches. batchCount = 1 for plain 2D.
+// inline void cublasBatchedMatMul(float* out, const float* A, const float* B,
+//                                  size_t m, size_t k, size_t n,
+//                                  long long strideA, long long strideB, long long strideC,
+//                                  size_t batchCount) {
+//     const float alpha = 1.0f, beta = 0.0f;
+//     cublasStatus_t stat = cublasSgemmStridedBatched(
+//         getCublasHandle(), CUBLAS_OP_N, CUBLAS_OP_N,
+//         (int)n, (int)m, (int)k,
+//         &alpha, B, (int)n, strideB, A, (int)k, strideA,
+//         &beta, out, (int)n, strideC, (int)batchCount);
+//     if (stat != CUBLAS_STATUS_SUCCESS) {
+//         std::cerr << "cublasSgemmStridedBatched failed: " << stat << '\n';
+//         std::abort();
+//     }
+// }
 
-inline void cublasBatchedMatMul(double* out, const double* A, const double* B,
-                                 size_t m, size_t k, size_t n,
-                                 long long strideA, long long strideB, long long strideC,
-                                 size_t batchCount) {
-    const double alpha = 1.0, beta = 0.0;
-    cublasStatus_t stat = cublasDgemmStridedBatched(
-        getCublasHandle(), CUBLAS_OP_N, CUBLAS_OP_N,
-        (int)n, (int)m, (int)k,
-        &alpha, B, (int)n, strideB, A, (int)k, strideA,
-        &beta, out, (int)n, strideC, (int)batchCount);
-    if (stat != CUBLAS_STATUS_SUCCESS) {
-        std::cerr << "cublasDgemmStridedBatched failed: " << stat << '\n';
-        std::abort();
-    }
-}
+// inline void cublasBatchedMatMul(double* out, const double* A, const double* B,
+//                                  size_t m, size_t k, size_t n,
+//                                  long long strideA, long long strideB, long long strideC,
+//                                  size_t batchCount) {
+//     const double alpha = 1.0, beta = 0.0;
+//     cublasStatus_t stat = cublasDgemmStridedBatched(
+//         getCublasHandle(), CUBLAS_OP_N, CUBLAS_OP_N,
+//         (int)n, (int)m, (int)k,
+//         &alpha, B, (int)n, strideB, A, (int)k, strideA,
+//         &beta, out, (int)n, strideC, (int)batchCount);
+//     if (stat != CUBLAS_STATUS_SUCCESS) {
+//         std::cerr << "cublasDgemmStridedBatched failed: " << stat << '\n';
+//         std::abort();
+//     }
+// }
 
 template <typename t>
 void tensor<t>::constructorAllocate() {
@@ -2331,7 +2332,12 @@ void tensor<t>::print() const {
     if (shape.size() == 2) {
         for (size_t r = 0; r < shape[0]; ++r) {
             for (size_t c = 0; c < shape[1]; ++c) {
-                std::cout << tempData[r * shape[1] + c] << ' ';
+                if constexpr (std::is_same_v<t, __half>) {
+                    std::cout << __half2float(tempData[r * shape[1] + c]) << ' ';
+                }
+                else {
+                    std::cout << tempData[r * shape[1] + c] << ' ';
+                }
             }
             std::cout << '\n';
         }
@@ -2344,7 +2350,12 @@ void tensor<t>::print() const {
                     size_t idx = b * shape[1] * shape[2]
                                + r * shape[2]
                                + c;
-                    std::cout << tempData[idx] << ' ';
+                    if constexpr (std::is_same_v<t, __half>) {
+                        std::cout << __half2float(tempData[r * shape[1] + c]) << ' ';
+                    }
+                    else {
+                        std::cout << tempData[r * shape[1] + c] << ' ';
+                    }
                 }
                 std::cout << '\n';
             }
@@ -2578,65 +2589,22 @@ tensor<t> tensor<t>::matMul(const tensor<t>& other) const & {
     toGPU();
     other.toGPU();
 
-    // tensor<t> out;
-    // constexpr int tileSize = 16;
-    // dim3 blockSize = dim3(tileSize, tileSize, 1);
-    // if (shape.size() == 2) {
-    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-    //     dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
-    //     // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //     matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
-    //     // cudaDeviceSynchronize();
-    //     cudaError_t err = cudaGetLastError();
-    //     if (err != cudaSuccess) {
-    //         std::cerr << "Kernel launch failed: "
-    //                 << cudaGetErrorString(err)
-    //                 << '\n';
-    //         std::abort();
-    //     }
-    // }
-    // else if (shape.size() == 3) {
-    //     if (shape.size() == other.shape.size()) {
-    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
-    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
-    //         }
-    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //         matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-    //         // cudaDeviceSynchronize();
-    //         cudaError_t err = cudaGetLastError();
-    //         if (err != cudaSuccess) {
-    //             std::cerr << "Kernel launch failed: "
-    //                     << cudaGetErrorString(err)
-    //                     << '\n';
-    //             std::abort();
-    //         }
-    //     }
-    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
-    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //         matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-    //         // cudaDeviceSynchronize();
-    //         cudaError_t err = cudaGetLastError();
-    //         if (err != cudaSuccess) {
-    //             std::cerr << "Kernel launch failed: "
-    //                     << cudaGetErrorString(err)
-    //                     << '\n';
-    //             std::abort();
-    //         }
-    //     }
-    //     else {
-    //         throw std::invalid_argument("Unsupported matmul shapes");
-    //     }    
-    // }
     tensor<t> out;
+    constexpr int tileSize = 16;
+    dim3 blockSize = dim3(tileSize, tileSize, 1);
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-        cublasBatchedMatMul(out.tens, tens, other.tens,
-                             shape[0], shape[1], other.shape[1],
-                             0, 0, 0, 1);
+        dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
+        // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+        matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
+        // cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
     }
     else if (shape.size() == 3) {
         if (shape.size() == other.shape.size()) {
@@ -2644,24 +2612,67 @@ tensor<t> tensor<t>::matMul(const tensor<t>& other) const & {
                 throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
             }
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-            cublasBatchedMatMul(out.tens, tens, other.tens,
-                                 shape[1], shape[2], other.shape[2],
-                                 shape[1] * shape[2],
-                                 other.shape[1] * other.shape[2],
-                                 out.shape[1] * out.shape[2],
-                                 shape[0]);
+            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+            matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+            // cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
         }
         else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-            cublasBatchedMatMul(out.tens, tens, other.tens,
-                                 shape[1], shape[2], other.shape[1],
-                                 shape[1] * shape[2],
-                                 0,   // broadcast: same B for every batch
-                                 out.shape[1] * out.shape[2],
-                                 shape[0]);
+            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+            matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+            // cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
         }
-        else { throw std::invalid_argument("Unsupported matmul shapes"); }    
+        else {
+            throw std::invalid_argument("Unsupported matmul shapes");
+        }    
     }
+    // tensor<t> out;
+    // if (shape.size() == 2) {
+    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
+    //     cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                          shape[0], shape[1], other.shape[1],
+    //                          0, 0, 0, 1);
+    // }
+    // else if (shape.size() == 3) {
+    //     if (shape.size() == other.shape.size()) {
+    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
+    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
+    //         }
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
+    //         cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                              shape[1], shape[2], other.shape[2],
+    //                              shape[1] * shape[2],
+    //                              other.shape[1] * other.shape[2],
+    //                              out.shape[1] * out.shape[2],
+    //                              shape[0]);
+    //     }
+    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
+    //         cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                              shape[1], shape[2], other.shape[1],
+    //                              shape[1] * shape[2],
+    //                              0,   // broadcast: same B for every batch
+    //                              out.shape[1] * out.shape[2],
+    //                              shape[0]);
+    //     }
+    //     else { throw std::invalid_argument("Unsupported matmul shapes"); }    
+    // }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         out.gradFunction = std::make_shared<matMulNode<t>>(this, &other);
         out.isGradEnabled = true;
@@ -2681,65 +2692,22 @@ tensor<t> tensor<t>::matMul(const tensor<t>& other) && {
     toGPU();
     other.toGPU();
 
-    // tensor<t> out;
-    // constexpr int tileSize = 16;
-    // dim3 blockSize = dim3(tileSize, tileSize, 1);
-    // if (shape.size() == 2) {
-    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-    //     dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
-    //     // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //     matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
-    //     // cudaDeviceSynchronize();
-    //     cudaError_t err = cudaGetLastError();
-    //     if (err != cudaSuccess) {
-    //         std::cerr << "Kernel launch failed: "
-    //                 << cudaGetErrorString(err)
-    //                 << '\n';
-    //         std::abort();
-    //     }
-    // }
-    // else if (shape.size() == 3) {
-    //     if (shape.size() == other.shape.size()) {
-    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
-    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
-    //         }
-    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //         matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-    //         // cudaDeviceSynchronize();
-    //         cudaError_t err = cudaGetLastError();
-    //         if (err != cudaSuccess) {
-    //             std::cerr << "Kernel launch failed: "
-    //                     << cudaGetErrorString(err)
-    //                     << '\n';
-    //             std::abort();
-    //         }
-    //     }
-    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
-    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //         matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-    //         // cudaDeviceSynchronize();
-    //         cudaError_t err = cudaGetLastError();
-    //         if (err != cudaSuccess) {
-    //             std::cerr << "Kernel launch failed: "
-    //                     << cudaGetErrorString(err)
-    //                     << '\n';
-    //             std::abort();
-    //         }
-    //     }
-    //     else {
-    //         throw std::invalid_argument("Unsupported matmul shapes");
-    //     }    
-    // }
     tensor<t> out;
+    constexpr int tileSize = 16;
+    dim3 blockSize = dim3(tileSize, tileSize, 1);
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-        cublasBatchedMatMul(out.tens, tens, other.tens,
-                             shape[0], shape[1], other.shape[1],
-                             0, 0, 0, 1);
+        dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
+        // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+        matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
+        // cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
     }
     else if (shape.size() == 3) {
         if (shape.size() == other.shape.size()) {
@@ -2747,24 +2715,67 @@ tensor<t> tensor<t>::matMul(const tensor<t>& other) && {
                 throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
             }
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-            cublasBatchedMatMul(out.tens, tens, other.tens,
-                                 shape[1], shape[2], other.shape[2],
-                                 shape[1] * shape[2],
-                                 other.shape[1] * other.shape[2],
-                                 out.shape[1] * out.shape[2],
-                                 shape[0]);
+            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+            matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+            // cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
         }
         else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-            cublasBatchedMatMul(out.tens, tens, other.tens,
-                                 shape[1], shape[2], other.shape[1],
-                                 shape[1] * shape[2],
-                                 0,   // broadcast: same B for every batch
-                                 out.shape[1] * out.shape[2],
-                                 shape[0]);
+            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+            matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+            // cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
         }
-        else { throw std::invalid_argument("Unsupported matmul shapes"); }    
+        else {
+            throw std::invalid_argument("Unsupported matmul shapes");
+        }    
     }
+    // tensor<t> out;
+    // if (shape.size() == 2) {
+    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
+    //     cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                          shape[0], shape[1], other.shape[1],
+    //                          0, 0, 0, 1);
+    // }
+    // else if (shape.size() == 3) {
+    //     if (shape.size() == other.shape.size()) {
+    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
+    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
+    //         }
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
+    //         cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                              shape[1], shape[2], other.shape[2],
+    //                              shape[1] * shape[2],
+    //                              other.shape[1] * other.shape[2],
+    //                              out.shape[1] * out.shape[2],
+    //                              shape[0]);
+    //     }
+    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
+    //         cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                              shape[1], shape[2], other.shape[1],
+    //                              shape[1] * shape[2],
+    //                              0,   // broadcast: same B for every batch
+    //                              out.shape[1] * out.shape[2],
+    //                              shape[0]);
+    //     }
+    //     else { throw std::invalid_argument("Unsupported matmul shapes"); }    
+    // }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
         out.gradFunction = std::make_shared<matMulNode<t>>(first, &other);
@@ -2785,65 +2796,22 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) const & {
     toGPU();
     other.toGPU();
 
-    // tensor<t> out;
-    // constexpr int tileSize = 16;
-    // dim3 blockSize = dim3(tileSize, tileSize, 1);
-    // if (shape.size() == 2) {
-    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-    //     dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
-    //     // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //     matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
-    //     // cudaDeviceSynchronize();
-    //     cudaError_t err = cudaGetLastError();
-    //     if (err != cudaSuccess) {
-    //         std::cerr << "Kernel launch failed: "
-    //                 << cudaGetErrorString(err)
-    //                 << '\n';
-    //         std::abort();
-    //     }
-    // }
-    // else if (shape.size() == 3) {
-    //     if (shape.size() == other.shape.size()) {
-    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
-    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
-    //         }
-    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //         matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-    //         // cudaDeviceSynchronize();
-    //         cudaError_t err = cudaGetLastError();
-    //         if (err != cudaSuccess) {
-    //             std::cerr << "Kernel launch failed: "
-    //                     << cudaGetErrorString(err)
-    //                     << '\n';
-    //             std::abort();
-    //         }
-    //     }
-    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
-    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //         matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-    //         // cudaDeviceSynchronize();
-    //         cudaError_t err = cudaGetLastError();
-    //         if (err != cudaSuccess) {
-    //             std::cerr << "Kernel launch failed: "
-    //                     << cudaGetErrorString(err)
-    //                     << '\n';
-    //             std::abort();
-    //         }
-    //     }
-    //     else {
-    //         throw std::invalid_argument("Unsupported matmul shapes");
-    //     }    
-    // }
     tensor<t> out;
+    constexpr int tileSize = 16;
+    dim3 blockSize = dim3(tileSize, tileSize, 1);
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-        cublasBatchedMatMul(out.tens, tens, other.tens,
-                             shape[0], shape[1], other.shape[1],
-                             0, 0, 0, 1);
+        dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
+        // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+        matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
+        // cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
     }
     else if (shape.size() == 3) {
         if (shape.size() == other.shape.size()) {
@@ -2851,24 +2819,67 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) const & {
                 throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
             }
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-            cublasBatchedMatMul(out.tens, tens, other.tens,
-                                 shape[1], shape[2], other.shape[2],
-                                 shape[1] * shape[2],
-                                 other.shape[1] * other.shape[2],
-                                 out.shape[1] * out.shape[2],
-                                 shape[0]);
+            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+            matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+            // cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
         }
         else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-            cublasBatchedMatMul(out.tens, tens, other.tens,
-                                 shape[1], shape[2], other.shape[1],
-                                 shape[1] * shape[2],
-                                 0,   // broadcast: same B for every batch
-                                 out.shape[1] * out.shape[2],
-                                 shape[0]);
+            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+            matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+            // cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
         }
-        else { throw std::invalid_argument("Unsupported matmul shapes"); }    
+        else {
+            throw std::invalid_argument("Unsupported matmul shapes");
+        }    
     }
+    // tensor<t> out;
+    // if (shape.size() == 2) {
+    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
+    //     cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                          shape[0], shape[1], other.shape[1],
+    //                          0, 0, 0, 1);
+    // }
+    // else if (shape.size() == 3) {
+    //     if (shape.size() == other.shape.size()) {
+    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
+    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
+    //         }
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
+    //         cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                              shape[1], shape[2], other.shape[2],
+    //                              shape[1] * shape[2],
+    //                              other.shape[1] * other.shape[2],
+    //                              out.shape[1] * out.shape[2],
+    //                              shape[0]);
+    //     }
+    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
+    //         cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                              shape[1], shape[2], other.shape[1],
+    //                              shape[1] * shape[2],
+    //                              0,   // broadcast: same B for every batch
+    //                              out.shape[1] * out.shape[2],
+    //                              shape[0]);
+    //     }
+    //     else { throw std::invalid_argument("Unsupported matmul shapes"); }    
+    // }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
         out.gradFunction = std::make_shared<matMulNode<t>>(this, second);
@@ -2889,65 +2900,22 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) && {
     toGPU();
     other.toGPU();
 
-    // tensor<t> out;
-    // constexpr int tileSize = 16;
-    // dim3 blockSize = dim3(tileSize, tileSize, 1);
-    // if (shape.size() == 2) {
-    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-    //     dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
-    //     // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //     matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
-    //     // cudaDeviceSynchronize();
-    //     cudaError_t err = cudaGetLastError();
-    //     if (err != cudaSuccess) {
-    //         std::cerr << "Kernel launch failed: "
-    //                 << cudaGetErrorString(err)
-    //                 << '\n';
-    //         std::abort();
-    //     }
-    // }
-    // else if (shape.size() == 3) {
-    //     if (shape.size() == other.shape.size()) {
-    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
-    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
-    //         }
-    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //         matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-    //         // cudaDeviceSynchronize();
-    //         cudaError_t err = cudaGetLastError();
-    //         if (err != cudaSuccess) {
-    //             std::cerr << "Kernel launch failed: "
-    //                     << cudaGetErrorString(err)
-    //                     << '\n';
-    //             std::abort();
-    //         }
-    //     }
-    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
-    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-    //         dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
-    //         // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
-    //         matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
-    //         // cudaDeviceSynchronize();
-    //         cudaError_t err = cudaGetLastError();
-    //         if (err != cudaSuccess) {
-    //             std::cerr << "Kernel launch failed: "
-    //                     << cudaGetErrorString(err)
-    //                     << '\n';
-    //             std::abort();
-    //         }
-    //     }
-    //     else {
-    //         throw std::invalid_argument("Unsupported matmul shapes");
-    //     }    
-    // }
     tensor<t> out;
+    constexpr int tileSize = 16;
+    dim3 blockSize = dim3(tileSize, tileSize, 1);
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], other.shape[1]);
-        cublasBatchedMatMul(out.tens, tens, other.tens,
-                             shape[0], shape[1], other.shape[1],
-                             0, 0, 0, 1);
+        dim3 gridSize = dim3(cuda::ceil_div(out.shape[1], tileSize), cuda::ceil_div(out.shape[0], tileSize), 1);
+        // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+        matMulKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[1], out.shape[0], out.shape[1]);
+        // cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            std::cerr << "Kernel launch failed: "
+                    << cudaGetErrorString(err)
+                    << '\n';
+            std::abort();
+        }
     }
     else if (shape.size() == 3) {
         if (shape.size() == other.shape.size()) {
@@ -2955,24 +2923,67 @@ tensor<t> tensor<t>::matMul(tensor<t>&& other) && {
                 throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
             }
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
-            cublasBatchedMatMul(out.tens, tens, other.tens,
-                                 shape[1], shape[2], other.shape[2],
-                                 shape[1] * shape[2],
-                                 other.shape[1] * other.shape[2],
-                                 out.shape[1] * out.shape[2],
-                                 shape[0]);
+            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+            matMul3DKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+            // cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
         }
         else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
             out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
-            cublasBatchedMatMul(out.tens, tens, other.tens,
-                                 shape[1], shape[2], other.shape[1],
-                                 shape[1] * shape[2],
-                                 0,   // broadcast: same B for every batch
-                                 out.shape[1] * out.shape[2],
-                                 shape[0]);
+            dim3 gridSize = dim3(cuda::ceil_div(out.shape[2], tileSize), cuda::ceil_div(out.shape[1], tileSize), shape[0]);
+            // std::cout << gridSize.x * gridSize.y << std::endl << blockSize.x * blockSize.y << std::endl;
+            matMul3DBroadCastKernel<<<gridSize, blockSize>>>(out.tens, tens, other.tens, shape[2], out.shape[1], out.shape[2]);
+            // cudaDeviceSynchronize();
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                std::cerr << "Kernel launch failed: "
+                        << cudaGetErrorString(err)
+                        << '\n';
+                std::abort();
+            }
         }
-        else { throw std::invalid_argument("Unsupported matmul shapes"); }    
+        else {
+            throw std::invalid_argument("Unsupported matmul shapes");
+        }    
     }
+    // tensor<t> out;
+    // if (shape.size() == 2) {
+    //     out = tensor<t>(device::GPU, shape[0], other.shape[1]);
+    //     cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                          shape[0], shape[1], other.shape[1],
+    //                          0, 0, 0, 1);
+    // }
+    // else if (shape.size() == 3) {
+    //     if (shape.size() == other.shape.size()) {
+    //         if (shape.size() == 3 && shape[2] != other.shape[1]) {
+    //             throw std::invalid_argument("Matrix multiplication requires A.cols == B.rows.");
+    //         }
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[2]);
+    //         cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                              shape[1], shape[2], other.shape[2],
+    //                              shape[1] * shape[2],
+    //                              other.shape[1] * other.shape[2],
+    //                              out.shape[1] * out.shape[2],
+    //                              shape[0]);
+    //     }
+    //     else if (other.shape.size() == 2 && shape[2] == other.shape[0]) {
+    //         out = tensor<t>(device::GPU, shape[0], shape[1], other.shape[1]);
+    //         cublasBatchedMatMul(out.tens, tens, other.tens,
+    //                              shape[1], shape[2], other.shape[1],
+    //                              shape[1] * shape[2],
+    //                              0,   // broadcast: same B for every batch
+    //                              out.shape[1] * out.shape[2],
+    //                              shape[0]);
+    //     }
+    //     else { throw std::invalid_argument("Unsupported matmul shapes"); }    
+    // }
     if ((isGradEnabled || other.isGradEnabled) && !isGradient) {
         std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
         std::shared_ptr<tensor<t>> second = std::make_shared<tensor<t>>(std::move(other));
@@ -3105,7 +3116,7 @@ void tensor<t>::identity() {
         dim3 gridSize = dim3(cuda::ceil_div(shape[1], 16), cuda::ceil_div(shape[2], 16), shape[0]);
         dim3 blockSize = dim3(16, 16, 1);
         isIdentity = true;
-        batchedIdentityKernel <<<gridSize, blockSize>>> (tens, shape[1], shape[2]);
+        batchedIdentityKernel<<<gridSize, blockSize>>>(tens, shape[1], shape[2]);
         // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
@@ -3149,7 +3160,12 @@ __global__ void expKernel(t* out, t* in, size_t storageLength) {
 
     if (idx >= storageLength) return;
 
-    out[idx] = exp(in[idx]);
+    if constexpr (std::is_same_v<t, __half>) {
+        out[idx] = hexp(in[idx]);
+    }
+    else {
+        out[idx] = exp(in[idx]);
+    }
 }
 
 template <typename t>
@@ -3202,8 +3218,15 @@ __global__ void powKernel(t* out, t* in, size_t storageLength, t power) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (idx >= storageLength) return;
+    if constexpr (std::is_same_v<t, __half>) {
+        float x = __half2float(in[idx]);
+        float p = __half2float(power);
 
-    out[idx] = pow(in[idx], power);
+        out[idx] = __float2half(powf(x, p));
+    }
+    else {
+        out[idx] = pow(in[idx], power);
+    }
 }
 
 template <typename t>
@@ -3256,8 +3279,12 @@ __global__ void logKernel(t* out, t* in, size_t storageLength) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (idx >= storageLength) return;
-
-    out[idx] = log(in[idx]);
+    if constexpr (std::is_same_v<t, __half>) {
+        out[idx] = hlog(in[idx]);
+    }
+    else {
+        out[idx] = log(in[idx]);
+    }
 }
 
 template <typename t>
@@ -3409,9 +3436,14 @@ template <typename t>
 __global__ void ReLUKernel(t*tens, t* out, size_t storageLength) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
     if (idx >= storageLength) return;
-
-    if (tens[idx] >= 0) out[idx] = tens[idx];
-    else out[idx] = 0;
+    if constexpr (std::is_same_v<t, __half>) {
+        if (tens[idx] >= __float2half(0)) out[idx] = tens[idx];
+        else out[idx] = __float2half(0);
+    }
+    else {
+        if (tens[idx] >= 0) out[idx] = tens[idx];
+        else out[idx] = 0;
+    }
 }
 
 template <typename t>
@@ -3466,8 +3498,12 @@ __global__ void sigmoidKernel(t*tens, t* out, size_t storageLength) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (idx >= storageLength) return;
-
-    out[idx] = 1 / (1 + exp(-tens[idx]));
+    if constexpr (std::is_same_v<t, __half>) {
+        out[idx] = __float2half(1) / (__float2half(1) + hexp(-tens[idx]));
+    }
+    else {
+        out[idx] = 1 / (1 + exp(-tens[idx]));
+    }
 }
 
 template <typename t>
@@ -3518,12 +3554,17 @@ tensor<t> tensor<t>::sigmoid() && {
 }
 
 template <typename t>
-__global__ void tanhKernel(t*tens, t* out, size_t storageLength) {
+__global__ void tanhKernel(const t* tens, t* out, size_t storageLength) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (idx >= storageLength) return;
 
-    out[idx] = (exp(tens[idx]) - exp(-tens[idx])) / (exp(tens[idx]) + exp(-tens[idx]));
+    if constexpr (std::is_same_v<t, __half>) {
+        out[idx] = htanh(tens[idx]);
+    }
+    else {
+        out[idx] = tanh(tens[idx]);
+    }
 }
 
 template <typename t>
@@ -3578,11 +3619,20 @@ __global__ void geluKernel(t* tens, t* out, size_t storageLength) {
     size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
 
     if (idx >= storageLength) return;
-    constexpr t root2OnRootPi = t(0.79788456080286535587989211986876L);
-    constexpr t geluConst = t(0.044715);
-    t temp = geluConst * tens[idx] * tens[idx] * tens[idx] + tens[idx];
-    temp *= root2OnRootPi;
-    out[idx] = 0.5 * tens[idx] * (1 + (tanh(temp)));
+    if constexpr (std::is_same_v<t, __half>) {
+        t root2OnRootPi = __double2half(0.79788456080286535587989211986876L);
+        t geluConst = __double2half(0.044715);
+        t temp = geluConst * tens[idx] * tens[idx] * tens[idx] + tens[idx];
+        temp *= root2OnRootPi;
+        out[idx] = __float2half(0.5) * tens[idx] * (__float2half(1) + (htanh(temp)));
+    }
+    else {
+        constexpr t root2OnRootPi = t(0.79788456080286535587989211986876L);
+        constexpr t geluConst = t(0.044715);
+        t temp = geluConst * tens[idx] * tens[idx] * tens[idx] + tens[idx];
+        temp *= root2OnRootPi;
+        out[idx] = 0.5 * tens[idx] * (1 + (tanh(temp)));
+    }
 }
 
 template <typename t>
@@ -3636,21 +3686,30 @@ template <typename t>
 __global__ void rowSumKernel(t* tens, t* out, size_t rows, size_t cols) {
     size_t row = blockIdx.x;
     size_t pos = row * cols;
-    __shared__ t temp[256];
-    temp[threadIdx.x] = 0;
+
+    using acc_t = std::conditional_t<std::is_same_v<t, __half>, float, t>;
+
+    __shared__ acc_t temp[256];
+
+    temp[threadIdx.x] = acc_t(0);
     __syncthreads();
 
     for (int i = 0; i < cols; i++) {
         if (threadIdx.x + blockDim.x * i >= cols) break;
-        temp[threadIdx.x] += tens[pos + threadIdx.x + blockDim.x * i];
+        temp[threadIdx.x] += static_cast<acc_t>(tens[pos + threadIdx.x + blockDim.x * i]);
     }
+
     __syncthreads();
-    for (int i = 1; i < 256; i*=2) {
-        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256)) 
-        temp[threadIdx.x] += temp[threadIdx.x + i];
+
+    for (int i = 1; i < 256; i *= 2) {
+        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256))
+            temp[threadIdx.x] += temp[threadIdx.x + i];
+
         __syncthreads();
     }
-    if (threadIdx.x == 0) out[row] = temp[0];
+
+    if (threadIdx.x == 0)
+        out[row] = static_cast<t>(temp[0]);
 }
 
 template <typename t>
@@ -3658,21 +3717,36 @@ __global__ void rowSum3DKernel(t* tens, t* out, size_t rows, size_t cols) {
     size_t row = blockIdx.x;
     size_t pos = row * cols;
     size_t batchNo = blockIdx.y;
-    __shared__ t temp[256];
-    temp[threadIdx.x] = 0;
+
+    using acc_t = std::conditional_t<std::is_same_v<t, __half>, float, t>;
+
+    __shared__ acc_t temp[256];
+
+    temp[threadIdx.x] = acc_t(0);
     __syncthreads();
 
     for (int i = 0; i < cols; i++) {
         if (threadIdx.x + blockDim.x * i >= cols) break;
-        temp[threadIdx.x] += tens[batchNo * rows * cols + pos + threadIdx.x + blockDim.x * i];
+
+        temp[threadIdx.x] += static_cast<acc_t>(
+            tens[batchNo * rows * cols +
+                 pos +
+                 threadIdx.x +
+                 blockDim.x * i]
+        );
     }
+
     __syncthreads();
-    for (int i = 1; i < 256; i*=2) {
-        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256)) 
-        temp[threadIdx.x] += temp[threadIdx.x + i];
+
+    for (int i = 1; i < 256; i *= 2) {
+        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256))
+            temp[threadIdx.x] += temp[threadIdx.x + i];
+
         __syncthreads();
     }
-    if (threadIdx.x == 0) out[batchNo * rows + row] = temp[0];
+
+    if (threadIdx.x == 0)
+        out[batchNo * rows + row] = static_cast<t>(temp[0]);
 }
 
 template <typename t>
@@ -4552,6 +4626,9 @@ tensorMem::tensorMem(tensor<float>* ptr) : refF(ptr) {
     if (On && ptr -> getDevice() == device::GPU) memoryManager::get().registerTensor(this);
 }  
 tensorMem::tensorMem(tensor<double>* ptr): refD(ptr) {
+    if (On && ptr -> getDevice() == device::GPU) memoryManager::get().registerTensor(this);
+}
+tensorMem::tensorMem(tensor<__half>* ptr): reffp16(ptr) {
     if (On && ptr -> getDevice() == device::GPU) memoryManager::get().registerTensor(this);
 }
 void tensorMem::toCPU() {

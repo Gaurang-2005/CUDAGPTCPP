@@ -2,7 +2,6 @@
 #include "nn/gpt.hpp"
 #include "tokenizer/tokenizer.hpp"
 
-
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -326,16 +325,16 @@ std::vector<std::vector<TokenID>> readBatchedInput(const std::string& filename) 
     return inputDoc;
 }
 
+template <typename t>
 float validationLoss(
-    GPT<float>& model,
+    GPT<t>& model,
     const std::vector<std::vector<TokenID>>& valInput,
     const std::vector<std::vector<TokenID>>& valTarget,
     size_t batchSize
 ) {
     std::cout << "valSize: " << valInput.size() << '\n';
-    float totalLoss = 0.0f;
+    t totalLoss = 0.0;
     size_t numBatches = 0;
-
     for (size_t start = 0;
          start + batchSize <= valInput.size();
          start += batchSize) {
@@ -351,22 +350,27 @@ float validationLoss(
         );
 
         auto out = model.forward(in);
-
-        auto loss = crossEntropyLoss<float>(out, target);
-
+        // out.print();
+        auto loss = crossEntropyLoss<t>(out, target);
+        // loss.print();
         // loss is a (1,1) tensor in your implementation
         loss.toCPU();
-        totalLoss += loss.data()[0];
-
         ++numBatches;
+        if constexpr (std::is_same_v<t, __half>) {
+            totalLoss += loss.data()[0] / __double2half(numBatches);
+        }
+        else {
+            totalLoss += loss.data()[0] / numBatches;
+        }
     }
 
-    return totalLoss / numBatches;
+    return totalLoss;
 }
 #include <chrono>
+using modelDType = float;
 void tinyShake() {
     // std::string trainText = readDataset("datasets/tiny shakespeare/train.csv");
-    BPE<float> tokenizer(4096);
+    BPE tokenizer(4096);
     // std::vector<std::string> doc;
     // doc.push_back(trainText);
     // tokenizer.train(doc);
@@ -396,8 +400,8 @@ void tinyShake() {
     //     }
     //     std::cout << std::endl;
     // }
-    GPT<float> model(device::GPU, (4096), context, 384, 2);
-    Adam<float> opti(model.parameters(), 0.001);
+    GPT<modelDType> model(device::GPU, (4096), context, 384, 2);
+    Adam<modelDType> opti(model.parameters(), 0.1);
     batchSize = 160;
     std::vector<std::vector<TokenID>> validationInput;
     std::vector<std::vector<TokenID>> validationTarget;
@@ -416,7 +420,7 @@ void tinyShake() {
     bool achieved = false;
     validationInput = readBatchedInput("datasets/tiny shakespeare/validationInput.bin");
     validationTarget = readBatchedInput("datasets/tiny shakespeare/validationTarget.bin");
-    model.load("datasets/tiny shakespeare/model.bin");
+    // model.load("datasets/tiny shakespeare/model (1).bin");
     for (int i = 0; i < 100; i++) {
         std::cout << "epoch: " << i <<'\n';
         int temp = 0;
@@ -431,7 +435,7 @@ void tinyShake() {
                 auto in = std::vector<std::vector<TokenID>>(inputDoc.begin() + batch, inputDoc.begin() + batch + batchSize);
                 auto out = model.forward(in);
                 auto targ = std::vector<std::vector<TokenID>>(targetDoc.begin() + batch, targetDoc.begin() + batch + batchSize);
-                auto loss = crossEntropyLoss<float>(out, targ);
+                auto loss = crossEntropyLoss<modelDType>(out, targ);
                 // auto start = std::chrono::steady_clock::now();
                 loss.backward();
                 // auto end = std::chrono::steady_clock::now();
@@ -440,7 +444,9 @@ void tinyShake() {
                 opti.step();
                 opti.clearGrad();
                 loss.clearGradientFunction();
-                if (!(valcnt % 500)) loss.print();
+                if (!(valcnt % 500)) {}
+                
+                loss.print();
 
                 model.save("datasets/tiny shakespeare/model.bin");
 
@@ -457,8 +463,8 @@ void tinyShake() {
                 //         ++total;
                 //     }
                 // }
-                // float accuracy =
-                //     static_cast<float>(correct) / static_cast<float>(total);
+                // modelDType accuracy =
+                //     static_cast<modelDType>(correct) / static_cast<modelDType>(total);
 
                 // std::cout << "Test accuracy: "
                 //         << accuracy * 100.0f
@@ -535,11 +541,11 @@ void tinyShake() {
         break;
     }
 
-    float accuracy =
-        static_cast<float>(correct) / static_cast<float>(total);
+    modelDType accuracy =
+        static_cast<modelDType>(correct) / static_cast<modelDType>(total);
 
     std::cout << "Test accuracy: "
-            << accuracy * 100.0f
+            << __half2float(accuracy) * 100.0f
             << "%\n";
 }
 

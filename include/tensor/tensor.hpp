@@ -6,6 +6,7 @@
 #include "autograd/node.hpp"
 #include <iostream>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 
 enum class device {
     CPU,
@@ -23,11 +24,13 @@ class tensorMem {
     const tensor<float>* refF = nullptr;
     const tensor<double>* refD = nullptr;
     const tensor<__half>* reffp16 = nullptr;
+    const tensor<__nv_bfloat16>* refbf16 = nullptr;
 public:
     const bool On = false;
     tensorMem(tensor<float>* ptr);  
     tensorMem(tensor<double>* ptr);
     tensorMem(tensor<__half>* ptr);
+    tensorMem(tensor<__nv_bfloat16>* ptr);
     void toCPU();
     void toGPU();
     ~tensorMem();
@@ -337,6 +340,10 @@ public:
                 out = *this / __double2half(storageLength);
                 out = out.sum();
             }
+            else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+                out = *this / __double2bfloat16(storageLength);
+                out = out.sum();
+            }
             else {
                 out = *this / storageLength;
                 out = out.sum();
@@ -348,17 +355,24 @@ public:
                 out = *this / __double2half(storageLength);
                 out = out.sum();
             }
+            else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+                out = *this / __double2bfloat16(storageLength);
+                out = out.sum();
+            }
             else {
                 out = *this / storageLength;
                 out = out.sum();
             }
         }
+
         if (isGradEnabled) {
             out.isGradEnabled = true;
             out.gradFunction = std::make_shared<meanNode<t>>(this);
         }
+
         return out;
     }
+
     tensor mean() && {
         tensor<t> out;
         if (isGradEnabled) {
@@ -367,6 +381,10 @@ public:
                 out = *this / __double2half(storageLength);
                 out = out.sum();
             }
+            else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+                out = *this / __double2bfloat16(storageLength);
+                out = out.sum();
+            }
             else {
                 out = *this / storageLength;
                 out = out.sum();
@@ -378,19 +396,26 @@ public:
                 out = *this / __double2half(storageLength);
                 out = out.sum();
             }
+            else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+                out = *this / __double2bfloat16(storageLength);
+                out = out.sum();
+            }
             else {
                 out = *this / storageLength;
                 out = out.sum();
             }
         }
+
         if (isGradEnabled) {
-            std::shared_ptr<tensor<t>> first = std::make_shared<tensor<t>>(std::move(*this));
+            std::shared_ptr<tensor<t>> first =
+                std::make_shared<tensor<t>>(std::move(*this));
+
             out.isGradEnabled = true;
             out.gradFunction = std::make_shared<meanNode<t>>(first);
         }
+
         return out;
     }
-
     void backward() {
         if (!isGradEnabled) throw std::invalid_argument("Gradient is not enabled on this tensor, so backward failed!");
         gradFunction -> pass();

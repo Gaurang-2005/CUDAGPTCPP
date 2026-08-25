@@ -7,6 +7,7 @@
 template class tensor<float>;
 template class tensor<double>;
 template class tensor<__half>;
+template class tensor<__nv_bfloat16>;
 
 //cublas testing:
 // #include <cublas_v2.h>
@@ -75,7 +76,7 @@ void tensor<t>::constructorAllocate() {
 template <typename t>
 void tensor<t>::toGPU() const {
     if (dev == device::GPU) {
-        memoryManager::get().registerTensor(&ref);
+        if (ref.On) memoryManager::get().registerTensor(&ref);
         return; 
     }
     t* tempgpuData = nullptr;
@@ -2335,6 +2336,9 @@ void tensor<t>::print() const {
                 if constexpr (std::is_same_v<t, __half>) {
                     std::cout << __half2float(tempData[r * shape[1] + c]) << ' ';
                 }
+                else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+                    std::cout << __bfloat162float(tempData[r * shape[1] + c]) << ' ';
+                }
                 else {
                     std::cout << tempData[r * shape[1] + c] << ' ';
                 }
@@ -2353,6 +2357,9 @@ void tensor<t>::print() const {
                     if constexpr (std::is_same_v<t, __half>) {
                         std::cout << __half2float(tempData[r * shape[1] + c]) << ' ';
                     }
+                    else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+                        std::cout << __bfloat162float(tempData[r * shape[1] + c]) << ' ';
+                    }
                     else {
                         std::cout << tempData[r * shape[1] + c] << ' ';
                     }
@@ -2370,25 +2377,32 @@ void tensor<t>::print() const {
 
 template <typename t>
 __global__ void transposeKernel(t* temp, t* tens, size_t storageLength, size_t x, size_t y) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    __shared__ t mat[32][33];
 
-    if (idx >= storageLength) return;
-    size_t xOld = idx / y;
-    size_t yOld = idx % y;
+    size_t tileRow = blockIdx.x * blockDim.x;
+    size_t tileCol = blockIdx.y * blockDim.y;
+    
+    if ((tileRow + threadIdx.x) * y + tileCol + threadIdx.y < storageLength) {
+        mat[threadIdx.x][threadIdx.y] = tens[(tileRow + threadIdx.x) * y + tileCol + threadIdx.y];
+    }
+    __syncthreads();
 
-    temp[yOld * x + xOld] = tens[idx];
+    if ((tileRow + threadIdx.x) * y + tileCol + threadIdx.y < storageLength) temp[(tileCol + threadIdx.y) * x + (tileRow + threadIdx.x)] = mat[threadIdx.x][threadIdx.y];
 }
 
 template <typename t>
 __global__ void transpose3DKernel(t* temp, t* tens, size_t storageLength, size_t x, size_t y) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t batchNo = blockIdx.y;
+    __shared__ t mat[32][33];
 
-    if (idx >= storageLength) return;
-    size_t xOld = idx / y;
-    size_t yOld = idx % y;
+    size_t tileRow = blockIdx.x * blockDim.x;
+    size_t tileCol = blockIdx.y * blockDim.y;
+    
+    if ((tileRow + threadIdx.x) * y + tileCol + threadIdx.y < storageLength) {
+        mat[threadIdx.x][threadIdx.y] = tens[(tileRow + threadIdx.x) * y + tileCol + threadIdx.y + blockIdx.z * storageLength];
+    }
+    __syncthreads();
 
-    temp[batchNo * storageLength + yOld * x + xOld] = tens[batchNo * storageLength + idx];
+    if ((tileCol + threadIdx.y) * x + (tileRow + threadIdx.x) < storageLength) temp[(tileCol + threadIdx.y) * x + (tileRow + threadIdx.x) + blockIdx.z * storageLength] = mat[threadIdx.x][threadIdx.y];
 }
 
 template <typename t>
@@ -2402,7 +2416,7 @@ tensor<t> tensor<t>::transposed() const & {
     tensor<t> temp;
     if (shape.size() == 2) {
         temp = tensor<t>(device::GPU, shape[1], shape[0]);
-        transposeKernel<<<cuda::ceil_div(storageLength, 256), 256>>> (temp.tens, tens, storageLength, shape[0], shape[1]);
+        transposeKernel<<<dim3(cuda::ceil_div(shape[0], 32), cuda::ceil_div(shape[1], 32)), dim3(32, 32)>>>(temp.tens, tens, storageLength, shape[0], shape[1]);
         // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
@@ -2414,7 +2428,7 @@ tensor<t> tensor<t>::transposed() const & {
     }
     else if (shape.size() == 3) {
         temp = tensor<t>(device::GPU, shape[0], shape[2], shape[1]);
-        transpose3DKernel<<<dim3(cuda::ceil_div(storageLength, 256), shape[0]), 256>>> (temp.tens, tens, shape[1] * shape[2], shape[1], shape[2]);
+        transpose3DKernel<<<dim3(cuda::ceil_div(shape[1], 32), cuda::ceil_div(shape[2], 32), shape[0]), dim3(32, 32, 1)>>> (temp.tens, tens, shape[1] * shape[2], shape[1], shape[2]);
         // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
@@ -2442,7 +2456,7 @@ tensor<t> tensor<t>::transposed() && {
     tensor<t> temp;
     if (shape.size() == 2) {
         temp = tensor<t>(device::GPU, shape[1], shape[0]);
-        transposeKernel<<<cuda::ceil_div(storageLength, 256), 256>>> (temp.tens, tens, storageLength, shape[0], shape[1]);
+        transposeKernel<<<dim3(cuda::ceil_div(shape[0], 16), cuda::ceil_div(shape[1], 16)), dim3(16, 16)>>>(temp.tens, tens, storageLength, shape[0], shape[1]);
         // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
@@ -2454,7 +2468,7 @@ tensor<t> tensor<t>::transposed() && {
     }
     else if (shape.size() == 3) {
         temp = tensor<t>(device::GPU, shape[0], shape[2], shape[1]);
-        transpose3DKernel<<<dim3(cuda::ceil_div(storageLength, 256), shape[0]), 256>>> (temp.tens, tens, shape[1] * shape[2], shape[1], shape[2]);
+        transpose3DKernel<<<dim3(cuda::ceil_div(shape[1], 16), cuda::ceil_div(shape[2], 16), shape[0]), dim3(16, 16, 1)>>> (temp.tens, tens, shape[1] * shape[2], shape[1], shape[2]);
         // cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
@@ -3163,6 +3177,9 @@ __global__ void expKernel(t* out, t* in, size_t storageLength) {
     if constexpr (std::is_same_v<t, __half>) {
         out[idx] = hexp(in[idx]);
     }
+    else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+        out[idx] = __float2bfloat16(expf(__bfloat162float(in[idx])));
+    }
     else {
         out[idx] = exp(in[idx]);
     }
@@ -3224,6 +3241,12 @@ __global__ void powKernel(t* out, t* in, size_t storageLength, t power) {
 
         out[idx] = __float2half(powf(x, p));
     }
+    else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+        float x = __bfloat162float(in[idx]);
+        float p = __bfloat162float(power);
+
+        out[idx] = __float2bfloat16(powf(x, p));
+    }
     else {
         out[idx] = pow(in[idx], power);
     }
@@ -3281,6 +3304,9 @@ __global__ void logKernel(t* out, t* in, size_t storageLength) {
     if (idx >= storageLength) return;
     if constexpr (std::is_same_v<t, __half>) {
         out[idx] = hlog(in[idx]);
+    }
+    else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+        out[idx] = __float2bfloat16(logf(__bfloat162float(in[idx])));
     }
     else {
         out[idx] = log(in[idx]);
@@ -3440,6 +3466,10 @@ __global__ void ReLUKernel(t*tens, t* out, size_t storageLength) {
         if (tens[idx] >= __float2half(0)) out[idx] = tens[idx];
         else out[idx] = __float2half(0);
     }
+    else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+        if (tens[idx] >= __float2bfloat16(0)) out[idx] = tens[idx];
+        else out[idx] = __float2bfloat16(0);
+    }
     else {
         if (tens[idx] >= 0) out[idx] = tens[idx];
         else out[idx] = 0;
@@ -3501,6 +3531,9 @@ __global__ void sigmoidKernel(t*tens, t* out, size_t storageLength) {
     if constexpr (std::is_same_v<t, __half>) {
         out[idx] = __float2half(1) / (__float2half(1) + hexp(-tens[idx]));
     }
+    else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+        out[idx] = __float2bfloat16(1.0f) / (__float2bfloat16(1.0f) + __float2bfloat16(expf(-__bfloat162float(tens[idx]))));
+    }
     else {
         out[idx] = 1 / (1 + exp(-tens[idx]));
     }
@@ -3561,6 +3594,9 @@ __global__ void tanhKernel(const t* tens, t* out, size_t storageLength) {
 
     if constexpr (std::is_same_v<t, __half>) {
         out[idx] = htanh(tens[idx]);
+    }
+    else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+        out[idx] = __float2bfloat16(tanhf(__bfloat162float(tens[idx])));
     }
     else {
         out[idx] = tanh(tens[idx]);
@@ -3626,6 +3662,13 @@ __global__ void geluKernel(t* tens, t* out, size_t storageLength) {
         temp *= root2OnRootPi;
         out[idx] = __float2half(0.5) * tens[idx] * (__float2half(1) + (htanh(temp)));
     }
+    else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+        t root2OnRootPi = __double2bfloat16(0.79788456080286535587989211986876L);
+        t geluConst = __double2bfloat16(0.044715);
+        t temp = geluConst * tens[idx] * tens[idx] * tens[idx] + tens[idx];
+        temp *= root2OnRootPi;
+        out[idx] = __float2bfloat16(0.5f) * tens[idx] * (__float2bfloat16(1.0f) + (htanh(temp)));
+    }
     else {
         constexpr t root2OnRootPi = t(0.79788456080286535587989211986876L);
         constexpr t geluConst = t(0.044715);
@@ -3687,22 +3730,21 @@ __global__ void rowSumKernel(t* tens, t* out, size_t rows, size_t cols) {
     size_t row = blockIdx.x;
     size_t pos = row * cols;
 
-    using acc_t = std::conditional_t<std::is_same_v<t, __half>, float, t>;
+    using acc_t = std::conditional_t<std::is_same_v<t, double>, double, float>;
 
     __shared__ acc_t temp[256];
 
     temp[threadIdx.x] = acc_t(0);
     __syncthreads();
 
-    for (int i = 0; i < cols; i++) {
-        if (threadIdx.x + blockDim.x * i >= cols) break;
-        temp[threadIdx.x] += static_cast<acc_t>(tens[pos + threadIdx.x + blockDim.x * i]);
+    for (size_t i = threadIdx.x; i < cols; i += blockDim.x) {
+        temp[threadIdx.x] += static_cast<acc_t>(tens[pos + i]);
     }
 
     __syncthreads();
 
-    for (int i = 1; i < 256; i *= 2) {
-        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256))
+    for (size_t i = blockDim.x / 2; i > 0; i /= 2) {
+        if (threadIdx.x < i)
             temp[threadIdx.x] += temp[threadIdx.x + i];
 
         __syncthreads();
@@ -3718,28 +3760,23 @@ __global__ void rowSum3DKernel(t* tens, t* out, size_t rows, size_t cols) {
     size_t pos = row * cols;
     size_t batchNo = blockIdx.y;
 
-    using acc_t = std::conditional_t<std::is_same_v<t, __half>, float, t>;
+    using acc_t = std::conditional_t<std::is_same_v<t, double>, double, float>;
 
     __shared__ acc_t temp[256];
 
     temp[threadIdx.x] = acc_t(0);
     __syncthreads();
 
-    for (int i = 0; i < cols; i++) {
-        if (threadIdx.x + blockDim.x * i >= cols) break;
-
+    for (size_t i = threadIdx.x; i < cols; i += blockDim.x) {
         temp[threadIdx.x] += static_cast<acc_t>(
-            tens[batchNo * rows * cols +
-                 pos +
-                 threadIdx.x +
-                 blockDim.x * i]
+            tens[batchNo * rows * cols + pos + i]
         );
     }
 
     __syncthreads();
 
-    for (int i = 1; i < 256; i *= 2) {
-        if (!(threadIdx.x % (2 * i) == i || threadIdx.x + i >= 256))
+    for (size_t i = blockDim.x / 2; i > 0; i /= 2) {
+        if (threadIdx.x < i)
             temp[threadIdx.x] += temp[threadIdx.x + i];
 
         __syncthreads();
@@ -3757,7 +3794,7 @@ tensor<t> tensor<t>::rowSum() const & {
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], 1);
         rowSumKernel<<<shape[0], 256>>>(tens, out.tens, shape[0], shape[1]);
-        // cudaDeviceSynchronize();
+        cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3769,7 +3806,7 @@ tensor<t> tensor<t>::rowSum() const & {
     else if (shape.size() == 3) {
         out = tensor<t>(device::GPU, shape[0], shape[1], 1);
         rowSum3DKernel<<<dim3(shape[1], shape[0]), 256>>>(tens, out.tens, shape[1], shape[2]);
-        // cudaDeviceSynchronize();
+        cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3794,7 +3831,7 @@ tensor<t> tensor<t>::rowSum() && {
     if (shape.size() == 2) {
         out = tensor<t>(device::GPU, shape[0], 1);
         rowSumKernel<<<shape[0], 256>>>(tens, out.tens, shape[0], shape[1]);
-        // cudaDeviceSynchronize();
+        cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -3806,7 +3843,7 @@ tensor<t> tensor<t>::rowSum() && {
     else if (shape.size() == 3) {
         out = tensor<t>(device::GPU, shape[0], shape[1], 1);
         rowSum3DKernel<<<dim3(shape[1], shape[0]), 256>>>(tens, out.tens, shape[1], shape[2]);
-        // cudaDeviceSynchronize();
+        cudaDeviceSynchronize();
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             std::cerr << "Kernel launch failed: "
@@ -4629,6 +4666,9 @@ tensorMem::tensorMem(tensor<double>* ptr): refD(ptr) {
     if (On && ptr -> getDevice() == device::GPU) memoryManager::get().registerTensor(this);
 }
 tensorMem::tensorMem(tensor<__half>* ptr): reffp16(ptr) {
+    if (On && ptr -> getDevice() == device::GPU) memoryManager::get().registerTensor(this);
+}
+tensorMem::tensorMem(tensor<__nv_bfloat16>* ptr): refbf16(ptr) {
     if (On && ptr -> getDevice() == device::GPU) memoryManager::get().registerTensor(this);
 }
 void tensorMem::toCPU() {

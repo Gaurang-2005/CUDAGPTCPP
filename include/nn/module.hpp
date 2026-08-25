@@ -137,7 +137,12 @@ public:
                 centered = input - (input.rowSum() / __double2half(input.getShape()[1]));
                 auto centcpy = centered;
                 var = std::move(centcpy).pow(2).rowSum() / __double2half(input.getShape()[1]);
-            }            
+            }  
+            else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+                centered = input - (input.rowSum() / __double2bfloat16(input.getShape()[1]));
+                auto centcpy = centered;
+                var = std::move(centcpy).pow(__double2bfloat16(2)).rowSum() / __double2bfloat16(input.getShape()[1]);
+            }          
             else {
                 centered = input - (input.rowSum() / input.getShape()[1]);
                 auto centcpy = centered;
@@ -156,7 +161,12 @@ public:
                 centered = input - (input.rowSum() / __double2half(input.getShape()[2]));
                 auto centcpy = centered;
                 var = std::move(centcpy).pow(2).rowSum() / __double2half(input.getShape()[2]);
-            }            
+            }  
+            else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+                centered = input - (input.rowSum() / __double2bfloat16(input.getShape()[2]));
+                auto centcpy = centered;
+                var = std::move(centcpy).pow(__double2bfloat16(2)).rowSum() / __double2bfloat16(input.getShape()[1]);
+            }          
             else {
                 centered = input - (input.rowSum() / input.getShape()[2]);
                 auto centcpy = centered;
@@ -183,13 +193,18 @@ public:
             if constexpr (std::is_same_v<t, __half>) {
                 centered = std::move(input1) - (std::move(input).rowSum() / __double2half(inShape[1]));
                 auto cent2 = centered;
-                var = std::move(cent2).pow(2).rowSum() / __double2half(inShape[1]);
-            }            
+                var = std::move(cent2).pow(__float2half(2.0f)).rowSum() / __double2half(inShape[1]);
+            }
+            else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+                centered = std::move(input1) - (std::move(input).rowSum() / __double2bfloat16(inShape[1]));
+                auto cent2 = centered;
+                var = std::move(cent2).pow(__float2bfloat16(2.0f)).rowSum() / __double2bfloat16(inShape[1]);
+            }
             else {
                 centered = std::move(input1) - (std::move(input).rowSum() / inShape[1]);
                 auto cent2 = centered;
                 var = std::move(cent2).pow(2).rowSum() / inShape[1];
-            }    
+            }
             auto varShape = var.getShape();
             auto std = (std::move(var) + epsilon).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);
@@ -204,13 +219,18 @@ public:
             if constexpr (std::is_same_v<t, __half>) {
                 centered = std::move(input1) - (std::move(input).rowSum() / __double2half(inShape[2]));
                 auto cent2 = centered;
-                var = std::move(cent2).pow(2).rowSum() / __double2half(inShape[2]);
-            }            
+                var = std::move(cent2).pow(__float2half(2.0f)).rowSum() / __double2half(inShape[2]);
+            }
+            else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
+                centered = std::move(input1) - (std::move(input).rowSum() / __double2bfloat16(inShape[2]));
+                auto cent2 = centered;
+                var = std::move(cent2).pow(__float2bfloat16(2.0f)).rowSum() / __double2bfloat16(inShape[2]);
+            }
             else {
                 centered = std::move(input1) - (std::move(input).rowSum() / inShape[2]);
                 auto cent2 = centered;
                 var = std::move(cent2).pow(2).rowSum() / inShape[2];
-            } 
+            }
             auto varShape = var.getShape();
             auto std = (std::move(var) + epsilon).pow(-0.5);
             auto norm = std::move(centered) * std::move(std);

@@ -10,6 +10,16 @@ template tensor<double> crossEntropyLoss(
     const std::vector<TokenID>&
 );
 
+template tensor<__half> crossEntropyLoss(
+    const tensor<__half>&,
+    const std::vector<TokenID>&
+);
+
+template tensor<__nv_bfloat16> crossEntropyLoss(
+    const tensor<__nv_bfloat16>&,
+    const std::vector<TokenID>&
+);
+
 template tensor<float> crossEntropyLoss(
     const tensor<float>&,
     const std::vector<std::vector<TokenID>>&
@@ -22,11 +32,11 @@ template tensor<double> crossEntropyLoss(
 
 template tensor<__half> crossEntropyLoss(
     const tensor<__half>&,
-    const std::vector<TokenID>&
+    const std::vector<std::vector<TokenID>>&
 );
 
-template tensor<__half> crossEntropyLoss(
-    const tensor<__half>&,
+template tensor<__nv_bfloat16> crossEntropyLoss(
+    const tensor<__nv_bfloat16>&,
     const std::vector<std::vector<TokenID>>&
 );
 

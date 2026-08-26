@@ -481,6 +481,7 @@ void tinyShake() {
                 std::cout << "Test accuracy: "
                         << __bfloat162float(accuracy) * 100.0f
                         << "%\n";
+                break;
 
             }
             // if ((valcnt == 0)) {
@@ -493,71 +494,72 @@ void tinyShake() {
             // }
             valcnt++; 
         }
+        break;
         if (achieved) break;
     }
-    model.load("datasets/tiny shakespeare/model.bin");
+    // model.load("datasets/tiny shakespeare/model.bin");
 
-    std::vector<std::vector<TokenID>> testInput;
-    std::vector<std::vector<TokenID>> testTarget;
+    // std::vector<std::vector<TokenID>> testInput;
+    // std::vector<std::vector<TokenID>> testTarget;
 
-    std::string testText =
-        readDataset("datasets/tiny shakespeare/train.csv");
+    // std::string testText =
+    //     readDataset("datasets/tiny shakespeare/train.csv");
 
-    std::vector<TokenID> testTokens =
-        tokenizer.encode(testText);
+    // std::vector<TokenID> testTokens =
+    //     tokenizer.encode(testText);
 
-    for (size_t i = 0; i + context < testTokens.size(); ++i) {
+    // for (size_t i = 0; i + context < testTokens.size(); ++i) {
 
-        testInput.emplace_back(
-            testTokens.begin() + i,
-            testTokens.begin() + i + context
-        );
+    //     testInput.emplace_back(
+    //         testTokens.begin() + i,
+    //         testTokens.begin() + i + context
+    //     );
 
-        testTarget.emplace_back(
-            testTokens.begin() + i + 1,
-            testTokens.begin() + i + context + 1
-        );
-    }
+    //     testTarget.emplace_back(
+    //         testTokens.begin() + i + 1,
+    //         testTokens.begin() + i + context + 1
+    //     );
+    // }
 
-    size_t correct = 0;
-    size_t total = 0;
+    // size_t correct = 0;
+    // size_t total = 0;
 
-    for (size_t i = 0; i < testInput.size(); i += batchSize) {
+    // for (size_t i = 0; i < testInput.size(); i += batchSize) {
 
-        size_t currentBatchSize =
-            std::min(batchSize, testInput.size() - i);
+    //     size_t currentBatchSize =
+    //         std::min(batchSize, testInput.size() - i);
 
-        std::vector<std::vector<TokenID>> in(
-            testInput.begin() + i,
-            testInput.begin() + i + currentBatchSize
-        );
+    //     std::vector<std::vector<TokenID>> in(
+    //         testInput.begin() + i,
+    //         testInput.begin() + i + currentBatchSize
+    //     );
 
-        std::vector<std::vector<TokenID>> target(
-            testTarget.begin() + i,
-            testTarget.begin() + i + currentBatchSize
-        );
+    //     std::vector<std::vector<TokenID>> target(
+    //         testTarget.begin() + i,
+    //         testTarget.begin() + i + currentBatchSize
+    //     );
 
-        auto out = model.forward(in);
-        auto predictions = out.argMax();
+    //     auto out = model.forward(in);
+    //     auto predictions = out.argMax();
 
-        for (size_t b = 0; b < predictions.size(); ++b) {
-            for (size_t t = 0; t < predictions[b].size(); ++t) {
+    //     for (size_t b = 0; b < predictions.size(); ++b) {
+    //         for (size_t t = 0; t < predictions[b].size(); ++t) {
 
-                if (predictions[b][t] == target[b][t])
-                    ++correct;
+    //             if (predictions[b][t] == target[b][t])
+    //                 ++correct;
 
-                ++total;
-            }
-        }
-        break;
-    }
+    //             ++total;
+    //         }
+    //     }
+    //     break;
+    // }
 
-    modelDType accuracy =
-        static_cast<modelDType>(correct) / static_cast<modelDType>(total);
+    // modelDType accuracy =
+    //     static_cast<modelDType>(correct) / static_cast<modelDType>(total);
 
-    std::cout << "Test accuracy: "
-            << __bfloat162float(accuracy) * 100.0f
-            << "%\n";
+    // std::cout << "Test accuracy: "
+    //         << __bfloat162float(accuracy) * 100.0f
+    //         << "%\n";
 }
 
 
@@ -637,11 +639,11 @@ void tinyShake() {
 //     std::cout << "Pred: " << intToString(logits.argMax()[0]) << "\n\n";
 // }
 int main() {
-    // tinyShake();
+    tinyShake();
 
-    tensor<float> t(device::GPU, {{1,2,3},{4,5,6}});
-    t.print();
-    t.transposed().print();
+    // tensor<float> t(device::GPU, {{1,2,3},{4,5,6}});
+    // t.print();
+    // t.transposed().print();
 }
 
 

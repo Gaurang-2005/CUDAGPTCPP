@@ -317,20 +317,40 @@ void tensor<t>::fill(t val) {
 }
 
 template <typename t>
-__global__ void randomKernel(size_t storageLength, t* tens) {
+__device__ __forceinline__ t philox(uint64_t seed, uint64_t counter) {
+    uint4 ctr{
+        (uint32_t)counter,
+        (uint32_t)(counter >> 32),
+        0,
+        0
+    };
+
+    uint2 key{
+        (uint32_t)seed,
+        (uint32_t)(seed >> 32)
+    };
+
+    uint4 result = curand_Philox4x32_10(ctr, key);
+
+    return static_cast<t>(result.x) / static_cast<t>(4294967296.0);
+}
+
+template <typename t>
+__global__ void randomKernel(size_t storageLength, t* tens, uint64_t seed, uint64_t offset) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx < storageLength) {
-        curandState state;
-        curand_init(clock64(), idx, 0, &state);
-        tens[idx] = (2 * curand_uniform(&state) - 1)/10;
+        t r = philox<t>(seed, offset + idx);
+        tens[idx] = (r * static_cast<t>(2) - static_cast<t>(1)) / static_cast<t>(10);
     }
 }
 
 template <typename t>
 void tensor<t>::random() {
     toGPU();
-    randomKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens);
+    uint64_t seed = 123456;
+    static uint64_t offset = 0;
+    randomKernel<<<cuda::ceil_div(storageLength, 256), 256>>>(storageLength, tens, seed, offset);
     // cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -339,6 +359,7 @@ void tensor<t>::random() {
                 << '\n';
         std::abort();
     }
+    offset += storageLength;
 }
 
 template <typename t>

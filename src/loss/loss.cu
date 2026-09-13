@@ -67,7 +67,8 @@ tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<TokenID>& 
     logits.requiresGrad(true);
     auto maxes2 = maxes;
 
-    auto shifted = logits - std::move(maxes).batch(logits.getShape()[1], 1);      
+    // see the batched overload: the trailing-1 broadcast is native, .batch() is not needed
+    auto shifted = logits - std::move(maxes);
 
     auto sumExp = std::move(shifted).exp().rowSum();
 
@@ -108,8 +109,9 @@ tensor<t> crossEntropyLoss(const tensor<t>& logits, const std::vector<std::vecto
     auto maxes = logits.rowMax();
     logits.requiresGrad(true);
     auto maxes2 = maxes;
-    auto shifted = logits - std::move(maxes).batch(logits.getShape()[2], 1);     
-    //shifted.print(); 
+    // operator- broadcasts a trailing 1 dim itself; .batch() would expand maxes into a
+    // full logits-sized tensor (batch x context x vocab) just to make the shapes equal.
+    auto shifted = logits - std::move(maxes);
     auto sumExp = std::move(shifted).exp().rowSum();
     auto logSumExp = std::move(sumExp).log() + std::move(maxes2);
     tensor<t> out(device::GPU, logits.getShape()[0], logits.getShape()[1], 1);

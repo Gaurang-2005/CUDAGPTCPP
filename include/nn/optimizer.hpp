@@ -87,18 +87,11 @@ public:
             v[i].toGPU();
             this->parameters[i]->requiresGrad(false);
 
-            if constexpr (std::is_same_v<t, __half>) {
-                m[i] = m[i] * __float2half(beta1) + *(this->parameters[i]->gradient()) * (__float2half(1.0f) - __float2half(beta1));
-                v[i] = v[i] * __float2half(beta2) + *(this->parameters[i]->gradient()) * *(this->parameters[i]->gradient()) * (__float2half(1.0f) - __float2half(beta2));
-            }
-            else if constexpr (std::is_same_v<t, __nv_bfloat16>) {
-                m[i] = m[i] * __float2bfloat16(beta1) + *(this->parameters[i]->gradient()) * (__float2bfloat16(1.0f) - __float2bfloat16(beta1));
-                v[i] = v[i] * __float2bfloat16(beta2) + *(this->parameters[i]->gradient()) * *(this->parameters[i]->gradient()) * (__float2bfloat16(1.0f) - __float2bfloat16(beta2));
-            }
-            else {
-                m[i] = m[i] * beta1 + *(this->parameters[i]->gradient()) * (1.0f - beta1);
-                v[i] = v[i] * beta2 + *(this->parameters[i]->gradient()) * *(this->parameters[i]->gradient()) * (1.0f - beta2);
-            }
+            // beta and (1 - beta) stay float all the way into the kernel. Narrowing them
+            // to t first is what breaks bf16/fp16: beta2 = 0.999 rounds to exactly 1.0,
+            // so (1 - beta2) becomes 0 and v never accumulates any gradient signal.
+            m[i] = m[i] * beta1 + *(this->parameters[i]->gradient()) * (1.0f - beta1);
+            v[i] = v[i] * beta2 + *(this->parameters[i]->gradient()) * *(this->parameters[i]->gradient()) * (1.0f - beta2);
 
             if constexpr (std::is_same_v<t, __half>) {
                 *(this->parameters[i]) = *(this->parameters[i]) - ((m[i] / __float2half(bias1)) / ((v[i] / __float2half(bias2)).pow(__float2half(0.5f)) + __float2half(epsilon))) * learningRate;

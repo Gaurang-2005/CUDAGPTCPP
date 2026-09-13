@@ -380,7 +380,7 @@ float validationLoss(
 }
 
 #include <chrono>
-using modelDType = float;
+using modelDType = __nv_bfloat16;
 void tinyShake() {
     // std::string trainText = readDataset("datasets/tiny shakespeare/train.csv");
     BPE tokenizer(4096);
@@ -414,8 +414,8 @@ void tinyShake() {
     //     std::cout << std::endl;
     // }
     GPT<modelDType> model(device::GPU, (4096), context, 384, 2);
-    Adam<modelDType> opti(model.parameters(), 0.01);
-    batchSize = 160;
+    Adam<modelDType> opti(model.parameters(), 0.0001);
+    batchSize = 450;
     std::vector<std::vector<TokenID>> validationInput;
     std::vector<std::vector<TokenID>> validationTarget;
     // std::cout << "test token size: " << testTokens.size() << '\n';
@@ -444,7 +444,7 @@ void tinyShake() {
                 // while (temp) {}
                 // temp++;
                 auto start = std::chrono::steady_clock::now();
-                // std::cout << "Data left: " << remain-- << '\n';
+                std::cout << "Data left: " << remain-- << '\n';
                 auto in = std::vector<std::vector<TokenID>>(inputDoc.begin() + batch, inputDoc.begin() + batch + batchSize);
                 auto out = model.forward(in);
                 auto targ = std::vector<std::vector<TokenID>>(targetDoc.begin() + batch, targetDoc.begin() + batch + batchSize);
@@ -455,33 +455,31 @@ void tinyShake() {
                 loss.clearGradientFunction();
                 auto end = std::chrono::steady_clock::now();
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-                std::cout << "Execution time: " << elapsed.count() << " ms" << std::endl;
-                if (!(valcnt % 500)) {}
-                
-                loss.print();
+                if (valcnt % 50 == 0) std::cout << "Execution time: " << elapsed.count() << " ms" << std::endl;
 
-                model.save("datasets/tiny shakespeare/model.bin");
+                if (valcnt % 50 == 0) loss.print();
 
-                auto out2 = model.forward(in);
-                auto predictions = out2.argMax();
-                int total = 0;
-                int correct = 0;
-                for (size_t b = 0; b < predictions.size(); ++b) {
-                    for (size_t t = 0; t < predictions[b].size(); ++t) {
+                if (valcnt % 50 == 0) {
+                    model.save("datasets/tiny shakespeare/model.bin");
+                    auto predictions = out.argMax();
+                    int total = 0;
+                    int correct = 0;
+                    for (size_t b = 0; b < predictions.size(); ++b) {
+                        for (size_t t = 0; t < predictions[b].size(); ++t) {
 
-                        if (predictions[b][t] == targ[b][t])
-                            ++correct;
+                            if (predictions[b][t] == targ[b][t])
+                                ++correct;
 
-                        ++total;
+                            ++total;
+                        }
                     }
-                }
-                modelDType accuracy =
-                    static_cast<modelDType>(correct) / static_cast<modelDType>(total);
+                    modelDType accuracy =
+                        static_cast<modelDType>(correct) / static_cast<modelDType>(total);
 
-                std::cout << "Test accuracy: "
-                        << __bfloat162float(accuracy) * 100.0f
-                        << "%\n";
-                break;
+                    std::cout << "Test accuracy: "
+                            << __bfloat162float(accuracy) * 100.0f
+                            << "%\n";
+                }
 
             }
             // if ((valcnt == 0)) {
@@ -494,8 +492,8 @@ void tinyShake() {
             // }
             valcnt++; 
         }
-        break;
         if (achieved) break;
+        //break;
     }
     // model.load("datasets/tiny shakespeare/model.bin");
 
@@ -644,6 +642,26 @@ int main() {
     // tensor<float> t(device::GPU, {{1,2,3},{4,5,6}});
     // t.print();
     // t.transposed().print();
+    // size_t M = 4096, K = 4096, N = 4096;
+    // tensor<__nv_bfloat16> A(device::GPU, M, K);
+    // tensor<__nv_bfloat16> B(device::GPU, K, N);
+    // A.random();
+    // B.random();
+    // for (int i = 0; i < 10; i++) A.matMul(B);
+    // auto start = std::chrono::high_resolution_clock::now();
+
+    // A.matMul(B);
+    // cudaDeviceSynchronize();
+    // auto end = std::chrono::high_resolution_clock::now();
+
+    // double seconds =
+    //     std::chrono::duration<double>(end - start).count();
+
+    // double tflops =
+    //     (2.0 * M * N * K) / seconds / 1e12;
+
+    // std::cout << "Time: " << seconds * 1000 << " ms\n";
+    // std::cout << "Throughput: " << tflops << " TFLOPS\n";
 }
 
 

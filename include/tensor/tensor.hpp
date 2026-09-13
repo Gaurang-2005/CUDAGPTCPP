@@ -474,6 +474,21 @@ public:
     tensor<t> operator-(t val) const &;
     tensor<t> operator+(t val) &&;
     tensor<t> operator-(t val) &&;
+
+    // Subtract a float scalar without first rounding it to t. The element is widened
+    // to float, subtracted, then narrowed back, so scalars that t cannot represent
+    // (e.g. 0.999 in bf16, which rounds to 1.0) keep their value.
+    tensor<t> operator-(float val) const & requires (!std::same_as<t, float>);
+    tensor<t> operator-(float val) && requires (!std::same_as<t, float>);
+    tensor<t> operator*(float val) const & requires (!std::same_as<t, float>);
+    tensor<t> operator*(float val) && requires (!std::same_as<t, float>);
+
+    // sum over b of this[b]^T * other[b], for 3D this (b, m, k) and other (b, m, n),
+    // giving (k, n). Both operands are contiguous, so the batch folds into the row
+    // dimension and this is a single GEMM -- doing it as a batched matMul followed by
+    // batchSum would materialise the (b, k, n) intermediate just to reduce it away.
+    // Backward-only primitive: it attaches no autograd node.
+    tensor<t> flatTransposeMatMul(const tensor<t>& other) const;
     tensor<t> batchSum() const;
     void printShape() {
         std::cout << "shape: ";

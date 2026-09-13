@@ -301,12 +301,7 @@ public:
         wVal.requiresGrad(false);
         input.requiresGrad(false);
         std::shared_ptr<tensor<t>> Q, K, V;
-        if (input.getShape().size() == 2) {
-            Q = std::make_shared<tensor<t>>(input.matMul(wQuery));
-            K = std::make_shared<tensor<t>>(input.matMul(wKey));
-            V = std::make_shared<tensor<t>>(input.matMul(wVal));
-        }
-        else if (input.getShape().size() == 3) {
+        if (input.getShape().size() == 2 || input.getShape().size() == 3) {
             Q = std::make_shared<tensor<t>>(input.matMul(wQuery));
             K = std::make_shared<tensor<t>>(input.matMul(wKey));
             V = std::make_shared<tensor<t>>(input.matMul(wVal));
@@ -328,12 +323,7 @@ public:
         wVal.requiresGrad(false);
         input.requiresGrad(false);
         std::shared_ptr<tensor<t>> Q, K, V;
-        if (input.getShape().size() == 2) {
-            Q = std::make_shared<tensor<t>>(input.matMul(wQuery));
-            K = std::make_shared<tensor<t>>(input.matMul(wKey));
-            V = std::make_shared<tensor<t>>(input.matMul(wVal));
-        }
-        else if (input.getShape().size() == 3) {
+        if (input.getShape().size() == 2 || input.getShape().size() == 3) {
             Q = std::make_shared<tensor<t>>(input.matMul(wQuery));
             K = std::make_shared<tensor<t>>(input.matMul(wKey));
             V = std::make_shared<tensor<t>>(input.matMul(wVal));

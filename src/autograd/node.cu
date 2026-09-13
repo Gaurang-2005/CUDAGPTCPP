@@ -440,8 +440,11 @@ void matMulNode<t>::backward(const tensor<t>& owner) {
         else B -> setGradient(std::make_shared<tensor<t>>((A -> transposed()).matMul(*owner.gradient())));
     }
     else {
-        if (B -> gradient()) *B -> gradient() += (A -> transposed()).matMul(*owner.gradient()).batchSum();
-        else B -> setGradient(std::make_shared<tensor<t>>((A -> transposed()).matMul(*owner.gradient()).batchSum()));
+        // dB = sum over batch of A[b]^T * dY[b]. One GEMM over the flattened batch:
+        // transposed().matMul(...).batchSum() builds the whole (batch, k, n) stack
+        // first, which for the lm_head is over a gigabyte just to be summed away.
+        if (B -> gradient()) *B -> gradient() += A -> flatTransposeMatMul(*owner.gradient());
+        else B -> setGradient(std::make_shared<tensor<t>>(A -> flatTransposeMatMul(*owner.gradient())));
     }
     A->requiresGrad(true);
     B->requiresGrad(true);
@@ -533,8 +536,10 @@ void expNode<t>::backward(const tensor<t>& owner) {
     if (debugGraph) std::cout << "expNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * A -> exp();
-    else A -> setGradient(std::make_shared<tensor<t>>(*(owner.gradient()) * A -> exp()));
+    // d/dx exp(x) = exp(x), which is exactly owner -- recomputing A->exp() here is a
+    // second full exp pass over a tensor the forward already produced.
+    if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * owner;
+    else A -> setGradient(std::make_shared<tensor<t>>(*(owner.gradient()) * owner));
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
@@ -548,10 +553,10 @@ void logNode<t>::backward(const tensor<t>& owner) {
     if (debugGraph) std::cout << "logNode init!\n";
     owner.gradient() -> requiresGrad(false);
     A->requiresGrad(false);
-    tensor<t> temp(*A.get());
-    temp.ones();
-    if (A -> gradient()) *A -> gradient() += *(owner.gradient()) * temp / *A.get();
-    else A -> setGradient(std::make_shared<tensor<t>>(*(owner.gradient()) * temp / *A.get()));
+    // d/dx log(x) = 1/x; the old form allocated a full tensor of ones and multiplied by
+    // it, which is an allocation, a fill and a whole no-op pass over the tensor.
+    if (A -> gradient()) *A -> gradient() += *(owner.gradient()) / *A.get();
+    else A -> setGradient(std::make_shared<tensor<t>>(*(owner.gradient()) / *A.get()));
     A -> requiresGrad(true);
 
     if (A -> gradientFunction()) A -> gradientFunction() -> backward(*A.get());
